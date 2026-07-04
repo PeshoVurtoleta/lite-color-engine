@@ -1,0 +1,87 @@
+{
+  "name": "@zakkster/lite-color-engine",
+  "version": "1.1.0",
+  "author": "Zahary Shinikchiev <shinikchiev@yahoo.com>",
+  "description": "Zero-GC, data-oriented OKLCH color engine with MINDE gamut mapping and palette-remap kernels for WebGL/Canvas pipelines.",
+  "type": "module",
+  "sideEffects": false,
+  "main": "./index.js",
+  "module": "./index.js",
+  "types": "./index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "node": "./index.js",
+      "import": "./index.js",
+      "default": "./index.js"
+    },
+    "./gamut": {
+      "types": "./src/Gamut.d.ts",
+      "node": "./src/Gamut.js",
+      "import": "./src/Gamut.js",
+      "default": "./src/Gamut.js"
+    },
+    "./remap": {
+      "types": "./src/Remap.d.ts",
+      "node": "./src/Remap.js",
+      "import": "./src/Remap.js",
+      "default": "./src/Remap.js"
+    }
+  },
+  "files": [
+    "src/",
+    "index.js",
+    "index.d.ts",
+    "README.md",
+    "CHANGELOG.md",
+    "llms.txt",
+    "LICENSE.md"
+  ],
+  "keywords": [
+    "color",
+    "oklch",
+    "oklab",
+    "gamut-mapping",
+    "minde",
+    "palette",
+    "remap",
+    "zero-gc",
+    "webgl",
+    "canvas",
+    "lut",
+    "interpolation",
+    "gradient",
+    "color-space",
+    "delta-e",
+    "dod",
+    "data-oriented",
+    "high-performance",
+    "game-dev"
+  ],
+  "scripts": {
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@zakkster/lite-lerp": "^1.0.0"
+  },
+  "devDependencies": {
+    "vitest": "^1.0.0"
+  },
+  "license": "MIT",
+  "homepage": "https://github.com/PeshoVurtoleta/lite-color-engine#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/PeshoVurtoleta/lite-color-engine.git"
+  },
+  "bugs": {
+    "url": "https://github.com/PeshoVurtoleta/lite-color-engine/issues",
+    "email": "shinikchiev@yahoo.com"
+  },
+  "funding": {
+    "type": "github",
+    "url": "https://github.com/sponsors/PeshoVurtoleta"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
