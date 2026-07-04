@@ -1,0 +1,1726 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>lite-color-engine // perceptual color instrument</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@300;400;500;700&display=swap" rel="stylesheet">
+<script type="importmap">
+{
+  "imports": {
+    "@zakkster/lite-color-engine": "../index.js",
+    "@zakkster/lite-color-engine/gamut": "../src/Gamut.js",
+    "@zakkster/lite-color-engine/remap": "../src/Remap.js",
+    "@zakkster/lite-lerp": "https://cdn.jsdelivr.net/npm/@zakkster/lite-lerp"
+  }
+}
+</script>
+<style>
+/* Palette in OKLCH — hex fallback declared first per convention.
+   Browsers that don't parse oklch() keep the hex; modern ones override. */
+:root {
+    --bg: #08090a;
+    --bg: oklch(0.09 0.006 240);
+    --bg-soft: #0f1113;
+    --bg-soft: oklch(0.13 0.005 240);
+    --bg-card: #131618;
+    --bg-card: oklch(0.16 0.005 240);
+    --line: #1f2326;
+    --line: oklch(0.23 0.005 240);
+    --line-bright: #2c3236;
+    --line-bright: oklch(0.30 0.006 240);
+    --ink: #e8e4dc;
+    --ink: oklch(0.91 0.010 80);
+    --ink-dim: #8a8680;
+    --ink-dim: oklch(0.58 0.008 75);
+    --ink-fade: #4d4a45;
+    --ink-fade: oklch(0.35 0.005 75);
+    --hot: #ff6644;
+    --hot: oklch(0.70 0.188 30);
+    --cool: #5fb7ff;
+    --cool: oklch(0.76 0.132 240);
+    --signal: #c4ff5c;
+    --signal: oklch(0.95 0.20 130);
+    --warn: #ffb84d;
+    --warn: oklch(0.83 0.148 75);
+    --grid: rgba(255, 255, 255, 0.025);
+
+    --f-serif: 'Instrument Serif', Georgia, serif;
+    --f-mono: 'JetBrains Mono', ui-monospace, monospace;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--f-mono);
+    font-weight: 400;
+    font-size: 13px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+}
+
+body {
+    min-height: 100vh;
+    background-image:
+        linear-gradient(var(--grid) 1px, transparent 1px),
+        linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+    background-size: 32px 32px;
+}
+
+.serif { font-family: var(--f-serif); font-weight: 400; letter-spacing: -0.01em; }
+.italic { font-style: italic; }
+
+.shell { max-width: 1400px; margin: 0 auto; padding: 32px 40px 120px; }
+
+/* ─── HEADER ─────────────────────────────────────────────────── */
+
+.frame { border: 1px solid var(--line); background: var(--bg-soft); }
+.bar {
+    display: flex; align-items: center; gap: 16px;
+    padding: 10px 16px; border-bottom: 1px solid var(--line);
+    font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--ink-dim);
+}
+.bar .spacer { margin-left: auto; }
+.bar .dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--signal); box-shadow: 0 0 8px var(--signal);
+    animation: pulse 1.6s ease-in-out infinite;
+}
+@keyframes pulse {
+    50% { opacity: 0.4; box-shadow: 0 0 14px var(--signal); }
+}
+
+.hero { padding: 72px 56px 80px; position: relative; overflow: hidden; }
+.hero::before {
+    content: ""; position: absolute; inset: 0; pointer-events: none;
+    background:
+        radial-gradient(ellipse 800px 400px at 80% 30%, oklch(0.70 0.188 30 / 0.09), transparent 60%),
+        radial-gradient(ellipse 600px 300px at 10% 80%, oklch(0.76 0.132 240 / 0.07), transparent 60%);
+}
+
+.kicker {
+    display: inline-block;
+    font-size: 10.5px; letter-spacing: 0.22em; text-transform: uppercase;
+    color: var(--ink-dim); border: 1px solid var(--line-bright);
+    padding: 5px 11px; margin-bottom: 28px;
+    position: relative; z-index: 1;
+}
+
+h1 {
+    font-family: var(--f-serif); font-weight: 400;
+    font-size: clamp(48px, 8vw, 96px); line-height: 0.95; letter-spacing: -0.025em;
+    color: var(--ink); margin-bottom: 24px;
+    position: relative; z-index: 1;
+}
+h1 em { font-style: italic; color: var(--hot); }
+
+.lede {
+    font-family: var(--f-serif); font-size: 22px; line-height: 1.4;
+    color: var(--ink-dim); max-width: 720px; margin-bottom: 40px;
+    position: relative; z-index: 1;
+}
+.lede em { font-style: italic; color: var(--ink); }
+
+.specs {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 0;
+    border-top: 1px solid var(--line);
+    position: relative; z-index: 1; margin-top: 24px;
+}
+.spec { padding: 18px 0 4px; border-right: 1px solid var(--line); }
+.spec:last-child { border-right: none; }
+.spec-label {
+    font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase;
+    color: var(--ink-fade); margin-bottom: 8px;
+}
+.spec-val { font-family: var(--f-serif); font-size: 28px; letter-spacing: -0.01em; }
+.spec-val .unit {
+    font-family: var(--f-mono); font-size: 11px; color: var(--ink-dim);
+    margin-left: 4px; letter-spacing: 0;
+}
+
+/* ─── SECTIONS ─────────────────────────────────────────────────── */
+
+.section { margin-top: 48px; }
+.section-head {
+    display: flex; align-items: baseline; gap: 24px;
+    padding-bottom: 14px; margin-bottom: 24px;
+    border-bottom: 1px solid var(--line);
+}
+.section-num {
+    font-family: var(--f-serif); font-style: italic;
+    font-size: 56px; line-height: 1; color: var(--hot);
+}
+.section-title { font-family: var(--f-serif); font-size: 36px; letter-spacing: -0.015em; flex: 1; }
+.section-meta {
+    font-size: 10.5px; letter-spacing: 0.16em; text-transform: uppercase;
+    color: var(--ink-dim); text-align: right;
+}
+.section-body {
+    font-family: var(--f-serif); font-size: 17px; color: var(--ink-dim);
+    max-width: 760px; margin-bottom: 32px; line-height: 1.55;
+}
+.section-body em { font-style: italic; color: var(--ink); }
+.section-body code {
+    font-family: var(--f-mono); font-size: 13px;
+    background: var(--bg-card); border: 1px solid var(--line);
+    padding: 1px 6px; border-radius: 2px; color: var(--signal);
+}
+
+/* ─── CARDS ─────────────────────────────────────────────────── */
+
+.card { background: var(--bg-card); border: 1px solid var(--line); }
+.card-head {
+    padding: 12px 16px; border-bottom: 1px solid var(--line);
+    display: flex; justify-content: space-between; align-items: center;
+    font-size: 10.5px; letter-spacing: 0.14em; text-transform: uppercase;
+    color: var(--ink-dim);
+}
+.card-head .tag {
+    background: var(--bg); border: 1px solid var(--line-bright);
+    padding: 2px 7px; font-size: 9.5px; color: var(--ink);
+}
+.card-head .tag.hot { border-color: var(--hot); color: var(--hot); }
+.card-body { padding: 16px; }
+
+/* ─── SECTION 01: PERCEPTUAL PROOF ─────────────────────────────── */
+
+.proof-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.gradient-strip { position: relative; width: 100%; height: 88px; display: block; }
+.gradient-strip canvas {
+    display: block; width: 100%; height: 100%;
+    image-rendering: pixelated; image-rendering: crisp-edges;
+}
+.gradient-readout {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px;
+    margin-top: 14px; font-size: 11px;
+}
+.readout-cell { border-left: 2px solid var(--line-bright); padding-left: 8px; }
+.readout-cell .lbl {
+    color: var(--ink-fade); font-size: 9.5px;
+    letter-spacing: 0.14em; text-transform: uppercase;
+}
+.readout-cell .val { color: var(--ink); margin-top: 3px; }
+
+.proof-callout {
+    margin-top: 24px; padding: 18px 20px;
+    background: var(--bg-soft); border-left: 2px solid var(--hot);
+    font-family: var(--f-serif); font-size: 16px; font-style: italic;
+    color: var(--ink); line-height: 1.5;
+}
+.proof-callout strong {
+    font-weight: 700; font-style: normal;
+    font-family: var(--f-mono); font-size: 12px;
+    letter-spacing: 0.1em; text-transform: uppercase;
+    color: var(--hot); display: block; margin-bottom: 6px;
+}
+.delta-line {
+    margin-top: 12px; font-family: var(--f-mono); font-size: 11px;
+    font-style: normal; color: var(--ink-dim); letter-spacing: 0.02em;
+}
+.delta-line .n { color: var(--signal); }
+
+/* ─── SECTION 02: GRADIENT LAB ─────────────────────────────── */
+
+.lab { display: grid; grid-template-columns: 1fr 360px; gap: 16px; }
+.lab-canvas-wrap { display: flex; flex-direction: column; gap: 16px; }
+.lab-output { height: 140px; border: 1px solid var(--line); }
+.lab-output canvas {
+    display: block; width: 100%; height: 100%; image-rendering: pixelated;
+}
+
+.stops-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px; }
+.stop-row {
+    display: grid;
+    grid-template-columns: 28px 1fr 60px 26px; gap: 8px; align-items: center;
+}
+.stop-row.hidden { display: none; }
+.stop-swatch {
+    width: 28px; height: 28px; border: 1px solid var(--line-bright);
+    cursor: pointer; position: relative; background-clip: padding-box;
+    background: var(--sw-bg, #000);
+}
+.stop-swatch input[type="color"] {
+    position: absolute; inset: 0; opacity: 0; cursor: pointer;
+}
+.stop-input {
+    background: var(--bg); border: 1px solid var(--line); color: var(--ink);
+    font-family: var(--f-mono); font-size: 11.5px; padding: 6px 8px; width: 100%;
+}
+.stop-input:focus { outline: none; border-color: var(--hot); }
+.stop-input.error { border-color: var(--hot); }
+.stop-pos {
+    background: var(--bg); border: 1px solid var(--line); color: var(--ink-dim);
+    font-family: var(--f-mono); font-size: 11px; padding: 6px 6px; text-align: right;
+}
+.stop-x {
+    background: transparent; border: 1px solid var(--line); color: var(--ink-dim);
+    font-family: var(--f-mono); font-size: 14px; cursor: pointer;
+    height: 26px; line-height: 1;
+}
+.stop-x[disabled] { opacity: 0.3; cursor: default; }
+@media (hover: hover) {
+    .stop-x:not([disabled]):hover { color: var(--hot); border-color: var(--hot); }
+}
+
+.lab-actions { display: flex; gap: 6px; margin-bottom: 14px; }
+.actions-inline { margin-top: 14px; }
+
+.btn {
+    background: var(--bg); border: 1px solid var(--line-bright); color: var(--ink);
+    font-family: var(--f-mono); font-size: 10.5px;
+    letter-spacing: 0.12em; text-transform: uppercase;
+    padding: 7px 12px; cursor: pointer; transition: 80ms;
+}
+@media (hover: hover) {
+    .btn:hover { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+}
+.btn.primary { border-color: var(--hot); color: var(--hot); }
+@media (hover: hover) {
+    .btn.primary:hover { background: var(--hot); color: var(--bg); }
+}
+.btn.big { font-size: 12px; padding: 12px 28px; }
+.btn:disabled { opacity: 0.4; cursor: default; }
+
+.preset-heading {
+    font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase;
+    color: var(--ink-fade); margin: 14px 0 8px;
+}
+.preset-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.preset {
+    background: transparent; border: 1px solid var(--line); color: var(--ink-dim);
+    font-family: var(--f-mono); font-size: 10px; letter-spacing: 0.08em;
+    padding: 5px 9px; cursor: pointer; transition: 80ms;
+}
+@media (hover: hover) {
+    .preset:hover { color: var(--ink); border-color: var(--ink-dim); }
+}
+
+.code-out {
+    background: var(--bg); border: 1px solid var(--line);
+    font-family: var(--f-mono); font-size: 11px; padding: 12px 14px;
+    color: var(--signal); white-space: pre-wrap; word-break: break-all; line-height: 1.55;
+}
+.code-out .k { color: var(--cool); }
+.code-out .s { color: var(--warn); }
+.code-out .c { color: var(--ink-fade); }
+
+/* ─── SECTION 03: PARTICLES ─────────────────────────────── */
+
+.particles-wrap { display: grid; grid-template-columns: 1fr 320px; gap: 16px; }
+.particle-canvas {
+    width: 100%; height: 480px; background: #000;
+    border: 1px solid var(--line); display: block;
+}
+.particles-side { display: flex; flex-direction: column; gap: 16px; }
+
+.metric-grid {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 1px;
+    background: var(--line); border: 1px solid var(--line);
+}
+.metric { background: var(--bg-card); padding: 14px 14px 16px; }
+.metric-label {
+    font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase;
+    color: var(--ink-fade); margin-bottom: 6px;
+}
+.metric-val {
+    font-family: var(--f-serif); font-size: 30px;
+    line-height: 1; letter-spacing: -0.02em;
+}
+.metric-val .unit {
+    font-family: var(--f-mono); font-size: 10px;
+    color: var(--ink-dim); margin-left: 3px;
+}
+.metric-val.hot { color: var(--hot); }
+.metric-val.cool { color: var(--cool); }
+.metric-val.signal { color: var(--signal); }
+
+.particle-controls { padding: 16px; }
+.particle-controls h4 {
+    font-size: 10.5px; letter-spacing: 0.16em; text-transform: uppercase;
+    color: var(--ink-dim); font-weight: 400; margin-bottom: 14px;
+}
+.slider-row {
+    display: grid; grid-template-columns: 1fr 56px;
+    gap: 10px; align-items: center; margin-bottom: 14px;
+}
+.slider-row label { font-size: 11px; color: var(--ink-dim); }
+.slider-row .v { font-size: 11px; text-align: right; color: var(--ink); }
+
+input[type="range"] {
+    -webkit-appearance: none; appearance: none;
+    width: 100%; height: 18px; background: transparent; cursor: pointer;
+    grid-column: 1 / -1;
+}
+input[type="range"]::-webkit-slider-runnable-track { height: 2px; background: var(--line-bright); }
+input[type="range"]::-moz-range-track { height: 2px; background: var(--line-bright); }
+input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 12px; height: 12px;
+    background: var(--hot); border: none; margin-top: -5px; border-radius: 0;
+}
+input[type="range"]::-moz-range-thumb {
+    width: 12px; height: 12px; background: var(--hot); border: none; border-radius: 0;
+}
+
+/* ─── SECTION 04: GAMUT BOUNDARY ─────────────────────────────── */
+
+.gamut-wrap { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.gamut-canvas-holder {
+    position: relative; width: 100%; aspect-ratio: 2 / 1;
+    border: 1px solid var(--line); background: var(--bg);
+}
+.gamut-canvas-holder canvas {
+    display: block; width: 100%; height: 100%; image-rendering: pixelated;
+}
+.gamut-axes {
+    position: absolute; inset: 0;
+    pointer-events: none;
+    font-family: var(--f-mono); font-size: 9.5px;
+    color: var(--ink-fade); letter-spacing: 0.1em;
+}
+.gamut-axes .x-lbl { position: absolute; left: 8px; bottom: 6px; }
+.gamut-axes .y-lbl {
+    position: absolute; left: 8px; top: 6px;
+    writing-mode: vertical-lr; transform: rotate(180deg);
+}
+
+.gamut-controls { margin-top: 20px; }
+.gamut-controls .row {
+    display: grid; grid-template-columns: auto 1fr auto;
+    gap: 14px; align-items: center; margin-bottom: 10px;
+}
+.gamut-controls .row label {
+    font-size: 10.5px; letter-spacing: 0.14em; text-transform: uppercase;
+    color: var(--ink-dim);
+}
+.gamut-controls .row .val {
+    font-family: var(--f-mono); font-size: 12px; color: var(--ink); min-width: 60px; text-align: right;
+}
+
+.gamut-stats {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px;
+    background: var(--line); border: 1px solid var(--line); margin-top: 16px;
+}
+.gamut-stat { background: var(--bg-card); padding: 12px 14px; }
+.gamut-stat .lbl {
+    font-size: 9.5px; letter-spacing: 0.14em; text-transform: uppercase;
+    color: var(--ink-fade); margin-bottom: 4px;
+}
+.gamut-stat .val {
+    font-family: var(--f-serif); font-size: 22px; letter-spacing: -0.01em; color: var(--ink);
+}
+.gamut-stat .val.hot { color: var(--hot); }
+
+/* ─── SECTION 05: RECOLOR ─────────────────────────────── */
+
+.recolor-wrap { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.recolor-panel { display: flex; flex-direction: column; gap: 12px; align-items: stretch; }
+.recolor-canvas-wrap {
+    border: 1px solid var(--line); background: var(--bg);
+    aspect-ratio: 1 / 1; overflow: hidden;
+}
+.recolor-canvas-wrap canvas {
+    display: block; width: 100%; height: 100%; image-rendering: pixelated;
+}
+.recolor-caption {
+    font-family: var(--f-mono); font-size: 10px; letter-spacing: 0.12em;
+    text-transform: uppercase; color: var(--ink-fade); text-align: center;
+}
+
+.recolor-palette {
+    display: flex; width: 100%; height: 34px;
+    border: 1px solid var(--line);
+}
+.recolor-swatch {
+    flex: 1; min-width: 4px; cursor: help;
+    background: var(--sw, oklch(0.5 0.1 0));
+    transition: transform 120ms;
+    display: none;
+}
+.recolor-swatch.active { display: block; }
+@media (hover: hover) {
+    .recolor-swatch:hover { transform: translateY(-2px); }
+}
+
+.recolor-controls {
+    background: var(--bg-card); border: 1px solid var(--line);
+    padding: 14px 16px 16px; margin-top: 16px;
+    display: flex; flex-direction: column; gap: 12px;
+}
+.recolor-controls .row {
+    display: grid; grid-template-columns: 1fr auto; gap: 14px; align-items: center;
+}
+.recolor-controls .row label { font-size: 10.5px; color: var(--ink-dim); letter-spacing: 0.1em; text-transform: uppercase; }
+.recolor-controls .row .val { font-family: var(--f-mono); font-size: 12px; color: var(--ink); }
+.recolor-toggle {
+    display: flex; gap: 8px; align-items: center;
+    font-size: 11px; color: var(--ink);
+}
+.recolor-toggle input[type="checkbox"] { accent-color: var(--hot); }
+
+/* ─── SECTION 06: BENCH ─────────────────────────────── */
+
+.bench-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+.bench-card { padding: 18px 20px 22px; }
+.bench-name {
+    font-size: 10.5px; letter-spacing: 0.16em; text-transform: uppercase;
+    color: var(--ink-dim); margin-bottom: 12px;
+}
+.bench-num {
+    font-family: var(--f-serif); font-size: 56px;
+    line-height: 1; letter-spacing: -0.025em; color: var(--ink);
+}
+.bench-unit {
+    font-family: var(--f-mono); font-size: 11px; color: var(--ink-dim);
+    letter-spacing: 0.08em; margin-top: 6px;
+}
+.bench-bar {
+    margin-top: 18px; height: 3px; background: var(--line-bright);
+    position: relative; overflow: hidden;
+}
+.bench-fill {
+    position: absolute; inset: 0 var(--fill-right, 100%) 0 0;
+    background: var(--hot);
+    transition: 600ms cubic-bezier(0.2, 0, 0.05, 1);
+}
+.bench-foot {
+    font-family: var(--f-serif); font-style: italic;
+    font-size: 13px; color: var(--ink-dim); margin-top: 14px; line-height: 1.4;
+}
+.bench-run-wrap { text-align: center; margin-top: 32px; }
+
+/* ─── FOOTER ─────────────────────────────── */
+
+.foot {
+    margin-top: 80px; padding-top: 32px; border-top: 1px solid var(--line);
+    display: flex; justify-content: space-between; align-items: baseline;
+    font-size: 11px; color: var(--ink-fade);
+}
+.foot .lead { display: flex; flex-direction: column; gap: 4px; }
+.foot .lead .sub { color: var(--ink-fade); }
+.foot .sig {
+    font-family: var(--f-serif); font-style: italic;
+    font-size: 16px; color: var(--ink-dim);
+}
+
+@media (max-width: 920px) {
+    .shell { padding: 16px; }
+    .specs { grid-template-columns: 1fr 1fr; }
+    .spec { padding: 14px 12px; }
+    .proof-grid, .lab, .particles-wrap, .gamut-wrap, .recolor-wrap, .bench-grid { grid-template-columns: 1fr; }
+    .hero { padding: 40px 20px 48px; }
+}
+</style>
+</head>
+<body>
+
+<div class="shell">
+
+<!-- ─── HERO ─────────────────────────────────────────── -->
+<div class="frame">
+    <div class="bar">
+        <span class="dot"></span>
+        <span>@zakkster/lite-color-engine</span>
+        <span class="spacer">v1.1.0 · ESM · 0 deps · imported via importmap</span>
+    </div>
+
+    <div class="hero">
+        <div class="kicker">Perceptual Color Instrument · Field Demo</div>
+        <h1>Color, but <em class="serif italic">measured</em><br>at sixty hertz.</h1>
+        <p class="lede">
+            A <em>zero-allocation</em> color pipeline for the modern web — parses any
+            CSS color, interpolates in OKLCH, gamut-maps to sRGB via CSS Color 4 MINDE,
+            and writes ready-to-blit RGBA32 directly to your <em>Canvas ImageData</em>.
+            No object pools. No garbage. No surprises in the hot path.
+        </p>
+
+        <div class="specs">
+            <div class="spec">
+                <div class="spec-label">Bundle</div>
+                <div class="spec-val">~2.4<span class="unit">KB gz</span></div>
+            </div>
+            <div class="spec">
+                <div class="spec-label">Hot-path alloc</div>
+                <div class="spec-val">0<span class="unit">bytes</span></div>
+            </div>
+            <div class="spec">
+                <div class="spec-label">Sub-exports</div>
+                <div class="spec-val">2<span class="unit">/gamut · /remap</span></div>
+            </div>
+            <div class="spec">
+                <div class="spec-label">Throughput</div>
+                <div class="spec-val">&gt;4M<span class="unit">packs/sec</span></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ─── SECTION 01: PERCEPTUAL PROOF ─────────────────────────────── -->
+<section class="section">
+    <div class="section-head">
+        <div class="section-num">01</div>
+        <div class="section-title serif italic">The Perceptual Proof</div>
+        <div class="section-meta">A · B Comparison</div>
+    </div>
+
+    <p class="section-body">
+        Interpolating colors in <em>sRGB</em> drags every gradient through a muddy mid-band — the
+        so-called <em>"dead zone"</em> where lightness collapses and hue drifts. <em>OKLCH</em> is
+        perceptually uniform: it interpolates the way the eye sees. Same two endpoints,
+        different spaces. Look closely at the middle — the <code>deltaEOK</code> readout
+        quantifies exactly how far off the sRGB midpoint drifts.
+    </p>
+
+    <div class="proof-grid">
+        <div class="card">
+            <div class="card-head">
+                <span>Naïve sRGB · linear blend</span>
+                <span class="tag">A</span>
+            </div>
+            <div class="card-body">
+                <div class="gradient-strip">
+                    <canvas id="rgb-strip" width="800" height="80"></canvas>
+                </div>
+                <div class="gradient-readout">
+                    <div class="readout-cell">
+                        <div class="lbl">Method</div>
+                        <div class="val">channel-wise lerp</div>
+                    </div>
+                    <div class="readout-cell">
+                        <div class="lbl">Mid hue</div>
+                        <div class="val" id="rgb-mid-hue">—</div>
+                    </div>
+                    <div class="readout-cell">
+                        <div class="lbl">Mid L*</div>
+                        <div class="val" id="rgb-mid-l">—</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-head">
+                <span>OKLCH · perceptual blend</span>
+                <span class="tag hot">B</span>
+            </div>
+            <div class="card-body">
+                <div class="gradient-strip">
+                    <canvas id="oklch-strip" width="800" height="80"></canvas>
+                </div>
+                <div class="gradient-readout">
+                    <div class="readout-cell">
+                        <div class="lbl">Method</div>
+                        <div class="val">lerpOklchBuffer</div>
+                    </div>
+                    <div class="readout-cell">
+                        <div class="lbl">Mid hue</div>
+                        <div class="val" id="oklch-mid-hue">—</div>
+                    </div>
+                    <div class="readout-cell">
+                        <div class="lbl">Mid L*</div>
+                        <div class="val" id="oklch-mid-l">—</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="proof-callout">
+        <strong>Observed</strong>
+        The sRGB blend dips through a <em>desaturated grey</em> at the midpoint — the eye
+        reads the gradient as having a dirty patch. The OKLCH blend holds chroma and
+        walks the hue along the shortest perceptual arc.
+        <div class="delta-line">
+            ΔE-OK between the two midpoints: <span class="n" id="delta-mid">—</span> — anything above 0.05 is clearly different to a trained eye.
+        </div>
+    </div>
+</section>
+
+<!-- ─── SECTION 02: GRADIENT LAB ─────────────────────────────── -->
+<section class="section">
+    <div class="section-head">
+        <div class="section-num">02</div>
+        <div class="section-title serif italic">The Gradient Lab</div>
+        <div class="section-meta">Live · Interactive</div>
+    </div>
+
+    <p class="section-body">
+        Edit the stops. Watch the <code>Uint32Array</code> rebuild. Every color
+        string is parsed by <code>parseCSSColor()</code> into a flat
+        <code>Float32Array</code>, interpolated by <code>lerpOklchBuffer()</code>,
+        and baked by <code>bakeGradientToUint32()</code> into a 256-sample LUT
+        ready for <em>direct ImageData blit</em>.
+    </p>
+
+    <div class="lab">
+        <div class="lab-canvas-wrap">
+            <div class="card">
+                <div class="card-head">
+                    <span>Output · 256-sample LUT · RGBA32</span>
+                    <span class="tag" id="lab-time">— ms</span>
+                </div>
+                <div class="lab-output">
+                    <canvas id="lab-canvas" width="1024" height="140"></canvas>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-head">
+                    <span>Compiled call</span>
+                    <span class="tag">JS</span>
+                </div>
+                <div class="card-body">
+                    <div class="code-out" id="lab-code"></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-head">
+                <span>Stops</span>
+                <span class="tag" id="stops-count">3</span>
+            </div>
+            <div class="card-body">
+                <div class="stops-list" id="stops-list"></div>
+                <div class="lab-actions">
+                    <button class="btn primary" id="add-stop">+ Add Stop</button>
+                    <button class="btn" id="reset-stops">Reset</button>
+                </div>
+                <div class="preset-heading">Presets</div>
+                <div class="preset-row" id="presets"></div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- ─── SECTION 03: PARTICLES ─────────────────────────────── -->
+<section class="section">
+    <div class="section-head">
+        <div class="section-num">03</div>
+        <div class="section-title serif italic">The Particle Engine</div>
+        <div class="section-meta">Direct ImageData · sampleColorLUT</div>
+    </div>
+
+    <p class="section-body">
+        A live particle system where every particle reads its color from the
+        LUT above, by lifetime, at <em>one Uint32 lookup per particle per
+        frame</em>. No allocations, no <code>Math.pow</code> on the hot path, no
+        <code>ctx.fillStyle</code> string churn. The LUT is built once when you
+        change the gradient — the simulation runs at the speed of memory.
+    </p>
+
+    <div class="particles-wrap">
+        <div class="card">
+            <div class="card-head">
+                <span>Direct-blit canvas · 720 × 480</span>
+                <span class="tag" id="particle-count">0 particles</span>
+            </div>
+            <canvas id="particles" class="particle-canvas" width="720" height="480"></canvas>
+        </div>
+
+        <div class="particles-side">
+            <div class="metric-grid">
+                <div class="metric">
+                    <div class="metric-label">Frame time</div>
+                    <div class="metric-val hot"><span id="m-ms-val">—</span><span class="unit">ms</span></div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">FPS</div>
+                    <div class="metric-val cool" id="m-fps">—</div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">Pixels written</div>
+                    <div class="metric-val signal"><span id="m-pix-val">—</span><span class="unit">/f</span></div>
+                </div>
+                <div class="metric">
+                    <div class="metric-label">GC pressure</div>
+                    <div class="metric-val"><span>0</span><span class="unit">B</span></div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="particle-controls">
+                    <h4>Simulation</h4>
+                    <div class="slider-row">
+                        <label>Particle count</label>
+                        <span class="v" id="v-count">2000</span>
+                        <input type="range" id="ctl-count" min="100" max="8000" step="100" value="2000">
+                    </div>
+                    <div class="slider-row">
+                        <label>Trail decay</label>
+                        <span class="v" id="v-trail">0.92</span>
+                        <input type="range" id="ctl-trail" min="60" max="98" step="1" value="92">
+                    </div>
+                    <div class="slider-row">
+                        <label>Field strength</label>
+                        <span class="v" id="v-field">1.00</span>
+                        <input type="range" id="ctl-field" min="0" max="200" step="1" value="100">
+                    </div>
+                    <div class="lab-actions actions-inline">
+                        <button class="btn primary" id="reseed">Reseed</button>
+                        <button class="btn" id="pause">Pause</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- ─── SECTION 04: GAMUT BOUNDARY (NEW · /gamut) ─────────────────────────────── -->
+<section class="section">
+    <div class="section-head">
+        <div class="section-num">04</div>
+        <div class="section-title serif italic">The Gamut Boundary</div>
+        <div class="section-meta">/gamut · CSS Color 4 MINDE</div>
+    </div>
+
+    <p class="section-body">
+        Saturated OKLCH colors that fall outside the sRGB triangle need to be pulled
+        back in. The <em>old way</em> — clamp each channel to <code>[0, 1]</code> —
+        introduces a visible hue shift near the boundary. <em>MINDE</em> reduces chroma
+        along a line of constant lightness and hue, using a JND-thresholded bisection.
+        Same L, same H, less C. Watch what happens along the edge.
+    </p>
+
+    <div class="gamut-wrap">
+        <div class="card">
+            <div class="card-head">
+                <span>Hard channel clamp</span>
+                <span class="tag">A</span>
+            </div>
+            <div class="card-body">
+                <div class="gamut-canvas-holder">
+                    <canvas id="gamut-clamp" width="480" height="240"></canvas>
+                    <div class="gamut-axes">
+                        <span class="y-lbl">CHROMA →</span>
+                        <span class="x-lbl">HUE 0° → 360°</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-head">
+                <span>MINDE gamut mapping</span>
+                <span class="tag hot">B</span>
+            </div>
+            <div class="card-body">
+                <div class="gamut-canvas-holder">
+                    <canvas id="gamut-minde" width="480" height="240"></canvas>
+                    <div class="gamut-axes">
+                        <span class="y-lbl">CHROMA →</span>
+                        <span class="x-lbl">HUE 0° → 360°</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="gamut-controls">
+        <div class="row">
+            <label>Lightness</label>
+            <input type="range" id="gamut-L" min="10" max="95" step="1" value="70">
+            <span class="val" id="gamut-L-v">0.70</span>
+        </div>
+        <div class="row">
+            <label>Max chroma</label>
+            <input type="range" id="gamut-Cmax" min="10" max="50" step="1" value="40">
+            <span class="val" id="gamut-Cmax-v">0.40</span>
+        </div>
+    </div>
+
+    <div class="gamut-stats">
+        <div class="gamut-stat">
+            <div class="lbl">Pixels differing</div>
+            <div class="val hot" id="gamut-diff-count">— / —</div>
+        </div>
+        <div class="gamut-stat">
+            <div class="lbl">Avg ΔE-OK (A vs B)</div>
+            <div class="val" id="gamut-avg-delta">—</div>
+        </div>
+        <div class="gamut-stat">
+            <div class="lbl">Max ΔE-OK</div>
+            <div class="val" id="gamut-max-delta">—</div>
+        </div>
+    </div>
+
+    <div class="proof-callout">
+        <strong>Observed</strong>
+        Every colored pixel is inside the sRGB gamut in both panels — the difference
+        is <em>where the excess chroma went</em>. Hard-clamp produces flat-topped
+        regions where different channels pin at 1.0 independently, creating false hue
+        edges. MINDE trades chroma for hue-and-lightness fidelity, along the perceptually
+        correct axis.
+    </div>
+</section>
+
+<!-- ─── SECTION 05: RECOLOR (NEW · /remap) ─────────────────────────────── -->
+<section class="section">
+    <div class="section-head">
+        <div class="section-num">05</div>
+        <div class="section-title serif italic">The Recolor</div>
+        <div class="section-meta">/remap · SoA nearest-palette</div>
+    </div>
+
+    <p class="section-body">
+        Take any raster, lock a palette, replace every pixel with its nearest palette
+        color by <em>ΔE-OK</em> — in OKLab, at native memory speed. Set
+        <em>preserveLightness</em> and the source image's own shading survives the
+        recolor. This is the specific thing generative AI color tools structurally
+        cannot do: <em>deterministic, hue-controlled</em> recoloring at 60 fps.
+    </p>
+
+    <div class="recolor-wrap">
+        <div class="recolor-panel">
+            <div class="recolor-canvas-wrap">
+                <canvas id="recolor-source" width="256" height="256"></canvas>
+            </div>
+            <div class="recolor-caption">source motif</div>
+        </div>
+
+        <div class="recolor-panel">
+            <div class="recolor-canvas-wrap">
+                <canvas id="recolor-out" width="256" height="256"></canvas>
+            </div>
+            <div class="recolor-caption">recolored preview · <span id="recolor-time">— ms</span></div>
+        </div>
+    </div>
+
+    <div class="recolor-palette" id="recolor-palette"></div>
+
+    <div class="recolor-controls">
+        <div class="row">
+            <label>Hue shift</label>
+            <span class="val" id="recolor-shift-v">0°</span>
+        </div>
+        <input type="range" id="recolor-shift" min="-180" max="180" step="1" value="0">
+        <label class="recolor-toggle">
+            <input type="checkbox" id="recolor-preserve" checked>
+            <span>preserveLightness — retain source shading</span>
+        </label>
+    </div>
+</section>
+
+<!-- ─── SECTION 06: BENCH ─────────────────────────────── -->
+<section class="section">
+    <div class="section-head">
+        <div class="section-num">06</div>
+        <div class="section-title serif italic">The Benchmark</div>
+        <div class="section-meta">Run In-Browser</div>
+    </div>
+
+    <p class="section-body">
+        Synthetic, isolated, run in <em>your</em> browser, on <em>your</em> hardware,
+        right now. No promises, no marketing — push the button.
+    </p>
+
+    <div class="bench-grid">
+        <div class="card bench-card">
+            <div class="bench-name">parseCSSColor / sec</div>
+            <div class="bench-num" id="b1-n">—</div>
+            <div class="bench-unit">300k iters · #hex · rgb · oklch · hsl</div>
+            <div class="bench-bar"><div class="bench-fill" id="b1-bar"></div></div>
+            <div class="bench-foot">Authoring path. Runs once at setup. The slow lane <em>by design</em>.</div>
+        </div>
+
+        <div class="card bench-card">
+            <div class="bench-name">lerpOklchBuffer / sec</div>
+            <div class="bench-num" id="b2-n">—</div>
+            <div class="bench-unit">2M iters · 3 floats in / 3 floats out</div>
+            <div class="bench-bar"><div class="bench-fill" id="b2-bar"></div></div>
+            <div class="bench-foot">The hot path. <em>Zero allocations.</em> Should comfortably exceed 10M/sec.</div>
+        </div>
+
+        <div class="card bench-card">
+            <div class="bench-name">packToUint32 / sec</div>
+            <div class="bench-num" id="b3-n">—</div>
+            <div class="bench-unit">2M iters · accurate sRGB encode</div>
+            <div class="bench-bar"><div class="bench-fill" id="b3-bar"></div></div>
+            <div class="bench-foot">OKLCH → linear sRGB → gamma → packed RGBA32. <em>One number, one pixel.</em></div>
+        </div>
+
+        <div class="card bench-card">
+            <div class="bench-name">packToUint32MINDE / sec</div>
+            <div class="bench-num" id="b4-n">—</div>
+            <div class="bench-unit">200k iters · CSS Color 4 chroma-reduce</div>
+            <div class="bench-bar"><div class="bench-fill" id="b4-bar"></div></div>
+            <div class="bench-foot">Bisection loop, JND-checked. Slower by design — this is for LUT build, not per frame.</div>
+        </div>
+
+        <div class="card bench-card">
+            <div class="bench-name">remapPixelsToPalette Mpx/sec</div>
+            <div class="bench-num" id="b5-n">—</div>
+            <div class="bench-unit">1Mpx image · 5-color palette</div>
+            <div class="bench-bar"><div class="bench-fill" id="b5-bar"></div></div>
+            <div class="bench-foot">RGBA8 → nearest-in-OKLab → RGBA-LE. <em>Palette pre-packed inside the call.</em></div>
+        </div>
+
+        <div class="card bench-card">
+            <div class="bench-name">deltaEOK / sec</div>
+            <div class="bench-num" id="b6-n">—</div>
+            <div class="bench-unit">10M iters · buffer-to-buffer</div>
+            <div class="bench-bar"><div class="bench-fill" id="b6-bar"></div></div>
+            <div class="bench-foot">Ten-line pure function. <em>Zero allocations.</em> Consumed by remap, audit, dedupe.</div>
+        </div>
+    </div>
+
+    <div class="bench-run-wrap">
+        <button class="btn primary big" id="run-bench">▶ Run All Benchmarks</button>
+    </div>
+</section>
+
+<!-- ─── FOOTER ─────────────────────────────────────────── -->
+<div class="foot">
+    <div class="lead">
+        <div>@zakkster/lite-color-engine · v1.1.0</div>
+        <div class="sub">MIT · zero-GC color pipeline for canvas, WebGL, and beyond</div>
+    </div>
+    <div class="sig">— a measurement instrument, not a paint set</div>
+</div>
+
+</div>
+
+<!-- ═════════════════════════════════════════════════════════════════
+     IMPORTMAP-BACKED MODULE SCRIPT
+     Imports directly from the actual @zakkster/lite-color-engine
+     package. Nothing about the engine's runtime code is duplicated here.
+     ═════════════════════════════════════════════════════════════════ -->
+<script type="module">
+import {
+    parseCSSColor,
+    sRgbToOklchBuffer,
+    lerpOklchBuffer,
+    packOklchBufferToUint32,
+    packOklchBufferToUint32Fast,
+    sampleColorLUT,
+    bakeGradientToUint32,
+    deltaEOK
+} from '@zakkster/lite-color-engine';
+import { packOklchBufferToUint32MINDE } from '@zakkster/lite-color-engine/gamut';
+import { remapPixelsToPalette } from '@zakkster/lite-color-engine/remap';
+
+// ═══════════════════════════════════════════════════════════════════
+// DOM refs (cached once)
+// ═══════════════════════════════════════════════════════════════════
+
+const $ = (id) => document.getElementById(id);
+
+// Fast integer thousands-separator. Measured ~3× faster than
+// Number.prototype.toLocaleString() in Node 22 (older engines are worse
+// because Intl/ICU improvements are recent). Used on slider-drag paths
+// in Section 03 (particle count) and Section 04 (gamut diff count).
+function formatWithCommas(n) {
+    const s = '' + (n | 0);
+    const len = s.length;
+    if (len <= 3) return s;
+    const first = len % 3 || 3;
+    let out = s.slice(0, first);
+    for (let i = first; i < len; i += 3) out += ',' + s.slice(i, i + 3);
+    return out;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// SECTION 01 — Perceptual Proof
+// ═══════════════════════════════════════════════════════════════════
+
+function paintPerceptualProof() {
+    const W = 800, H = 80;
+    // Endpoints chosen to expose sRGB's "dead zone": yellow → blue.
+    const endA_rgb = [255, 200, 0];
+    const endB_rgb = [0, 80, 220];
+
+    // --- A: naive sRGB blend ---
+    {
+        const ctx = $('rgb-strip').getContext('2d');
+        const img = ctx.createImageData(W, H);
+        const u32 = new Uint32Array(img.data.buffer);
+        for (let x = 0; x < W; x++) {
+            const t = x / (W - 1);
+            const r = (endA_rgb[0] + (endB_rgb[0] - endA_rgb[0]) * t) | 0;
+            const g = (endA_rgb[1] + (endB_rgb[1] - endA_rgb[1]) * t) | 0;
+            const b = (endA_rgb[2] + (endB_rgb[2] - endA_rgb[2]) * t) | 0;
+            const px = ((255 << 24) | (b << 16) | (g << 8) | r) >>> 0;
+            for (let y = 0; y < H; y++) u32[y * W + x] = px;
+        }
+        ctx.putImageData(img, 0, 0);
+        const mr = ((endA_rgb[0] + endB_rgb[0]) / 2) | 0;
+        const mg = ((endA_rgb[1] + endB_rgb[1]) / 2) | 0;
+        const mb = ((endA_rgb[2] + endB_rgb[2]) / 2) | 0;
+        const mid = new Float32Array(3);
+        sRgbToOklchBuffer(mr, mg, mb, mid, 0);
+        $('rgb-mid-hue').textContent = mid[2].toFixed(1) + '°';
+        $('rgb-mid-l').textContent = mid[0].toFixed(3);
+        _rgbMid.set(mid);
+    }
+
+    // --- B: OKLCH blend ---
+    {
+        const ctx = $('oklch-strip').getContext('2d');
+        const img = ctx.createImageData(W, H);
+        const u32 = new Uint32Array(img.data.buffer);
+        const A = new Float32Array(3), B = new Float32Array(3);
+        sRgbToOklchBuffer(...endA_rgb, A, 0);
+        sRgbToOklchBuffer(...endB_rgb, B, 0);
+        const tmp = new Float32Array(3);
+        for (let x = 0; x < W; x++) {
+            const t = x / (W - 1);
+            lerpOklchBuffer(A, 0, B, 0, t, tmp, 0);
+            const px = packOklchBufferToUint32(tmp, 0, 1);
+            for (let y = 0; y < H; y++) u32[y * W + x] = px;
+        }
+        ctx.putImageData(img, 0, 0);
+        lerpOklchBuffer(A, 0, B, 0, 0.5, tmp, 0);
+        $('oklch-mid-hue').textContent = tmp[2].toFixed(1) + '°';
+        $('oklch-mid-l').textContent = tmp[0].toFixed(3);
+        _oklchMid.set(tmp);
+    }
+
+    // ΔE-OK between the two midpoints
+    const dE = deltaEOK(_rgbMid, 0, _oklchMid, 0);
+    $('delta-mid').textContent = dE.toFixed(4);
+}
+const _rgbMid = new Float32Array(3);
+const _oklchMid = new Float32Array(3);
+
+// ═══════════════════════════════════════════════════════════════════
+// SECTION 02 — Gradient Lab (with pooled DOM for stops list)
+// ═══════════════════════════════════════════════════════════════════
+
+const PRESETS = {
+    'sunset':      ['#0a1f3d', '#ff4d4d', '#ffcc00'],
+    'aurora':      ['#001a2c', '#00b894', '#a29bfe', '#fdcb6e'],
+    'lava':        ['#000000', '#7a0010', '#ff4500', '#fff7c4'],
+    'cyberpunk':   ['#150b2c', '#ff006e', '#3a86ff', '#ffea00'],
+    'pastel-arc':  ['#ffd6e0', '#c8e0ff', '#d6f5d6'],
+    'mono-grade':  ['#000000', '#888888', '#ffffff'],
+    'fire-ramp':   ['#000000', '#660000', '#ff5500', '#ffee44', '#ffffff'],
+    'ocean':       ['#001a3d', '#003366', '#0099cc', '#66ffcc']
+};
+const MAX_STOPS = 8;
+
+let stops = ['#ff4500', '#ff00cc', '#00ccff'];
+let currentLUT = null;
+
+// Pre-build MAX_STOPS pooled rows once — no innerHTML on stop edits.
+const _stopRows = new Array(MAX_STOPS);
+const $stopsList = $('stops-list');
+for (let i = 0; i < MAX_STOPS; i++) {
+    const row = document.createElement('div');
+    row.className = 'stop-row hidden';
+
+    const sw = document.createElement('label');
+    sw.className = 'stop-swatch';
+    const colorInput = document.createElement('input');
+    colorInput.type = 'color';
+    colorInput.dataset.i = String(i);
+    sw.appendChild(colorInput);
+
+    const textInput = document.createElement('input');
+    textInput.className = 'stop-input';
+    textInput.type = 'text';
+    textInput.dataset.i = String(i);
+
+    const pos = document.createElement('input');
+    pos.className = 'stop-pos';
+    pos.type = 'text';
+    pos.readOnly = true;
+
+    const rm = document.createElement('button');
+    rm.className = 'stop-x';
+    rm.textContent = '×';
+    rm.dataset.i = String(i);
+
+    row.appendChild(sw);
+    row.appendChild(textInput);
+    row.appendChild(pos);
+    row.appendChild(rm);
+    $stopsList.appendChild(row);
+    _stopRows[i] = { row, sw, colorInput, textInput, pos, rm };
+}
+
+// Delegated event handler for the whole stops list
+$stopsList.addEventListener('input', (e) => {
+    const t = e.target;
+    const i = +t.dataset.i;
+    if (t.type === 'color') {
+        stops[i] = t.value;
+        renderStops();
+        rebuildLUT();
+    } else if (t.classList.contains('stop-input')) {
+        // Wait for change event on text input for validation
+    }
+});
+$stopsList.addEventListener('change', (e) => {
+    const t = e.target;
+    if (!t.classList.contains('stop-input')) return;
+    const i = +t.dataset.i;
+    const v = t.value.trim();
+    try {
+        const scratch = new Float32Array(3);
+        parseCSSColor(v, scratch, 0);
+        stops[i] = v;
+        t.classList.remove('error');
+        renderStops();
+        rebuildLUT();
+    } catch {
+        t.classList.add('error');
+        setTimeout(() => t.classList.remove('error'), 800);
+    }
+});
+$stopsList.addEventListener('click', (e) => {
+    const t = e.target;
+    if (!t.classList.contains('stop-x')) return;
+    if (stops.length <= 2) return;
+    const i = +t.dataset.i;
+    stops.splice(i, 1);
+    renderStops();
+    rebuildLUT();
+});
+
+function renderStops() {
+    $('stops-count').textContent = stops.length;
+    for (let i = 0; i < MAX_STOPS; i++) {
+        const ref = _stopRows[i];
+        if (i < stops.length) {
+            const color = stops[i];
+            ref.row.classList.remove('hidden');
+            ref.sw.style.setProperty('--sw-bg', color);
+            ref.colorInput.value = /^#[0-9a-f]{6}$/i.test(color) ? color : '#888888';
+            ref.textInput.value = color;
+            const pct = stops.length === 1 ? 0 : (i / (stops.length - 1) * 100);
+            ref.pos.value = pct.toFixed(0) + '%';
+            ref.rm.disabled = stops.length <= 2;
+        } else {
+            ref.row.classList.add('hidden');
+        }
+    }
+}
+
+function rebuildLUT() {
+    const t0 = performance.now();
+    const buf = new Float32Array(stops.length * 3);
+    for (let i = 0; i < stops.length; i++) {
+        try { parseCSSColor(stops[i], buf, i * 3); }
+        catch { buf[i * 3] = 0; buf[i * 3 + 1] = 0; buf[i * 3 + 2] = 0; }
+    }
+    currentLUT = bakeGradientToUint32(buf, stops.length, 256);
+
+    const cnv = $('lab-canvas');
+    const ctx = cnv.getContext('2d');
+    const W = cnv.width, H = cnv.height;
+    const img = ctx.createImageData(W, H);
+    const u32 = new Uint32Array(img.data.buffer);
+    for (let x = 0; x < W; x++) {
+        const px = sampleColorLUT(currentLUT, x / (W - 1));
+        for (let y = 0; y < H; y++) u32[y * W + x] = px;
+    }
+    ctx.putImageData(img, 0, 0);
+    $('lab-time').textContent = (performance.now() - t0).toFixed(2) + ' ms';
+
+    // Code preview (small, static, one write — acceptable innerHTML)
+    const codeEl = $('lab-code');
+    const parseLines = stops.map((s, i) =>
+        `parseCSSColor(<span class="s">'${s}'</span>, stops, ${i * 3});`).join('\n');
+    codeEl.innerHTML =
+        `<span class="c">// ${stops.length} stops · 256 samples</span>\n` +
+        `<span class="k">const</span> stops = <span class="k">new</span> Float32Array(${stops.length * 3});\n` +
+        parseLines + '\n' +
+        `<span class="k">const</span> lut = bakeGradientToUint32(stops, ${stops.length}, <span class="k">256</span>);`;
+}
+
+// Presets (small, static, built once)
+{
+    const $presets = $('presets');
+    for (const name of Object.keys(PRESETS)) {
+        const b = document.createElement('button');
+        b.className = 'preset';
+        b.textContent = name;
+        b.addEventListener('click', () => {
+            stops = [...PRESETS[name]];
+            renderStops();
+            rebuildLUT();
+        });
+        $presets.appendChild(b);
+    }
+}
+
+$('add-stop').addEventListener('click', () => {
+    if (stops.length >= MAX_STOPS) return;
+    stops.push('#' + Math.floor(Math.random() * 0xffffff).toString(16).padStart(6, '0'));
+    renderStops();
+    rebuildLUT();
+});
+$('reset-stops').addEventListener('click', () => {
+    stops = ['#ff4500', '#ff00cc', '#00ccff'];
+    renderStops();
+    rebuildLUT();
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// SECTION 03 — Particle engine
+// ═══════════════════════════════════════════════════════════════════
+
+const pCanvas = $('particles');
+const pCtx = pCanvas.getContext('2d', { willReadFrequently: false });
+const PW = pCanvas.width, PH = pCanvas.height;
+const TAU = Math.PI * 2;
+
+let pCount = 2000, pTrail = 0.92, pField = 1.0, pPaused = false;
+let px = new Float32Array(0);
+let py = new Float32Array(0);
+let pvx = new Float32Array(0);
+let pvy = new Float32Array(0);
+let pAge = new Float32Array(0);
+let pLife = new Float32Array(0);
+
+function reseed(n = pCount) {
+    px = new Float32Array(n); py = new Float32Array(n);
+    pvx = new Float32Array(n); pvy = new Float32Array(n);
+    pAge = new Float32Array(n); pLife = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+        px[i] = Math.random() * PW; py[i] = Math.random() * PH;
+        const a = Math.random() * TAU;
+        const s = 0.5 + Math.random() * 1.5;
+        pvx[i] = Math.cos(a) * s; pvy[i] = Math.sin(a) * s;
+        pAge[i] = Math.random();
+        pLife[i] = 1.5 + Math.random() * 3.0;
+    }
+    pCount = n;
+    $('particle-count').textContent = formatWithCommas(n) + ' particles';
+}
+
+const trailImg = pCtx.createImageData(PW, PH);
+const trailU32 = new Uint32Array(trailImg.data.buffer);
+
+let lastT = 0;
+let cpuMsEMA = 0, framesInWindow = 0, wallWindowStart = 0;
+
+function tick(now) {
+    if (pPaused) { requestAnimationFrame(tick); return; }
+    const dt = lastT === 0 ? 0.016 : Math.min(0.05, (now - lastT) / 1000);
+    lastT = now;
+
+    const tStart = performance.now();
+
+    // Decay trail
+    const decay = pTrail;
+    const bytes = trailImg.data;
+    for (let i = 0; i < bytes.length; i += 4) {
+        bytes[i]     = (bytes[i] * decay) | 0;
+        bytes[i + 1] = (bytes[i + 1] * decay) | 0;
+        bytes[i + 2] = (bytes[i + 2] * decay) | 0;
+    }
+
+    let pixWritten = 0;
+    const lut = currentLUT;
+    if (lut) {
+        for (let i = 0; i < pCount; i++) {
+            pAge[i] += dt / pLife[i];
+            if (pAge[i] >= 1) {
+                pAge[i] = 0;
+                px[i] = Math.random() * PW; py[i] = Math.random() * PH;
+                const a = Math.random() * TAU;
+                const s = 0.5 + Math.random() * 1.5;
+                pvx[i] = Math.cos(a) * s; pvy[i] = Math.sin(a) * s;
+            }
+            const t = now * 0.0004;
+            const cx = px[i] * 0.008, cy = py[i] * 0.008;
+            const fx = Math.sin(cy + t) * pField;
+            const fy = Math.cos(cx - t) * pField;
+            pvx[i] = pvx[i] * 0.96 + fx * 0.04;
+            pvy[i] = pvy[i] * 0.96 + fy * 0.04;
+            px[i] += pvx[i]; py[i] += pvy[i];
+            if (px[i] < 0) px[i] += PW; else if (px[i] >= PW) px[i] -= PW;
+            if (py[i] < 0) py[i] += PH; else if (py[i] >= PH) py[i] -= PH;
+            const color = sampleColorLUT(lut, pAge[i]);
+            const xi = px[i] | 0, yi = py[i] | 0;
+            const idx = yi * PW + xi;
+            trailU32[idx] = color;
+            if (xi + 1 < PW) trailU32[idx + 1] = color;
+            if (yi + 1 < PH) trailU32[idx + PW] = color;
+            if (xi + 1 < PW && yi + 1 < PH) trailU32[idx + PW + 1] = color;
+            pixWritten += 4;
+        }
+    }
+
+    pCtx.putImageData(trailImg, 0, 0);
+
+    const cpuMs = performance.now() - tStart;
+    cpuMsEMA = cpuMsEMA === 0 ? cpuMs : cpuMsEMA * 0.9 + cpuMs * 0.1;
+    framesInWindow++;
+    if (wallWindowStart === 0) wallWindowStart = now;
+    const wallElapsed = now - wallWindowStart;
+    if (wallElapsed >= 250) {
+        const actualFps = (framesInWindow * 1000) / wallElapsed;
+        // Zero HTML parsing — write only to pre-existing text nodes.
+        $('m-ms-val').textContent = cpuMsEMA.toFixed(2);
+        $('m-fps').textContent = actualFps.toFixed(0);
+        $('m-pix-val').textContent = (pixWritten / 1000).toFixed(1) + 'k';
+        framesInWindow = 0;
+        wallWindowStart = now;
+    }
+    requestAnimationFrame(tick);
+}
+
+$('ctl-count').addEventListener('input', e => {
+    const n = +e.target.value;
+    $('v-count').textContent = n;
+    reseed(n);
+});
+$('ctl-trail').addEventListener('input', e => {
+    pTrail = +e.target.value / 100;
+    $('v-trail').textContent = pTrail.toFixed(2);
+});
+$('ctl-field').addEventListener('input', e => {
+    pField = +e.target.value / 100;
+    $('v-field').textContent = pField.toFixed(2);
+});
+$('reseed').addEventListener('click', () => reseed(pCount));
+$('pause').addEventListener('click', e => {
+    pPaused = !pPaused;
+    e.target.textContent = pPaused ? 'Resume' : 'Pause';
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// SECTION 04 — Gamut Boundary (NEW · /gamut)
+// ═══════════════════════════════════════════════════════════════════
+
+const $gClamp = $('gamut-clamp');
+const $gMinde = $('gamut-minde');
+const gClampCtx = $gClamp.getContext('2d');
+const gMindeCtx = $gMinde.getContext('2d');
+const GW = $gClamp.width, GH = $gClamp.height;
+const GAMUT_TOTAL_STR = formatWithCommas(GW * GH);   // constant, computed once
+
+// Grid: x maps to hue [0, 360), y maps to chroma [0, Cmax] (bottom = 0, top = Cmax)
+const _gClampImg = gClampCtx.createImageData(GW, GH);
+const _gMindeImg = gMindeCtx.createImageData(GW, GH);
+const _gClampU32 = new Uint32Array(_gClampImg.data.buffer);
+const _gMindeU32 = new Uint32Array(_gMindeImg.data.buffer);
+const _gTmp = new Float32Array(3);
+const _gTmpA = new Float32Array(3);
+const _gTmpB = new Float32Array(3);
+
+let gamutL = 0.70, gamutCmax = 0.40;
+
+function paintGamut() {
+    let diffCount = 0, sumDelta = 0, maxDelta = 0;
+    for (let y = 0; y < GH; y++) {
+        // y=0 → top row → highest chroma
+        const C = gamutCmax * (1 - y / (GH - 1));
+        for (let x = 0; x < GW; x++) {
+            const H = (x / GW) * 360;
+            _gTmp[0] = gamutL; _gTmp[1] = C; _gTmp[2] = H;
+            const clampU32 = packOklchBufferToUint32(_gTmp, 0, 1);
+            const mindeU32 = packOklchBufferToUint32MINDE(_gTmp, 0, 1);
+            const idx = y * GW + x;
+            _gClampU32[idx] = clampU32;
+            _gMindeU32[idx] = mindeU32;
+            if (clampU32 !== mindeU32) {
+                diffCount++;
+                // Decode both to OKLCH-ish measure via sRgbToOklchBuffer for ΔE-OK
+                sRgbToOklchBuffer(clampU32 & 0xFF, (clampU32 >>> 8) & 0xFF, (clampU32 >>> 16) & 0xFF, _gTmpA, 0);
+                sRgbToOklchBuffer(mindeU32 & 0xFF, (mindeU32 >>> 8) & 0xFF, (mindeU32 >>> 16) & 0xFF, _gTmpB, 0);
+                const d = deltaEOK(_gTmpA, 0, _gTmpB, 0);
+                sumDelta += d;
+                if (d > maxDelta) maxDelta = d;
+            }
+        }
+    }
+    gClampCtx.putImageData(_gClampImg, 0, 0);
+    gMindeCtx.putImageData(_gMindeImg, 0, 0);
+    const total = GW * GH;
+    const pct = (diffCount / total * 100).toFixed(1);
+    $('gamut-diff-count').textContent = formatWithCommas(diffCount) + ' / ' + GAMUT_TOTAL_STR + ' (' + pct + '%)';
+    $('gamut-avg-delta').textContent = diffCount > 0 ? (sumDelta / diffCount).toFixed(4) : '0.0000';
+    $('gamut-max-delta').textContent = maxDelta.toFixed(4);
+}
+
+$('gamut-L').addEventListener('input', e => {
+    gamutL = +e.target.value / 100;
+    $('gamut-L-v').textContent = gamutL.toFixed(2);
+    paintGamut();
+});
+$('gamut-Cmax').addEventListener('input', e => {
+    gamutCmax = +e.target.value / 100;
+    $('gamut-Cmax-v').textContent = gamutCmax.toFixed(2);
+    paintGamut();
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// SECTION 05 — Recolor (NEW · /remap)
+// ═══════════════════════════════════════════════════════════════════
+
+const $rSrc = $('recolor-source');
+const $rOut = $('recolor-out');
+const rSrcCtx = $rSrc.getContext('2d', { willReadFrequently: true });
+const rOutCtx = $rOut.getContext('2d');
+const RW = $rSrc.width, RH = $rSrc.height;
+
+const _rSrcImage = rSrcCtx.createImageData(RW, RH);
+const _rOutImage = rOutCtx.createImageData(RW, RH);
+const _rOutU32 = new Uint32Array(_rOutImage.data.buffer);
+
+// Palette in OKLCH — 5 stops picked for a visually striking recolor.
+const RECOLOR_PALETTE_STOPS = [
+    { l: 0.30, c: 0.14, h:  30 },
+    { l: 0.55, c: 0.16, h: 350 },
+    { l: 0.70, c: 0.14, h: 190 },
+    { l: 0.85, c: 0.10, h: 100 },
+    { l: 0.20, c: 0.05, h: 260 }
+];
+const MAX_RECOLOR_COLORS = 8;
+const _recolorPaletteLch = new Float32Array(MAX_RECOLOR_COLORS * 3);
+let _recolorPaletteN = 0;
+
+// Pre-build max palette swatches once
+const _recolorSwatches = new Array(MAX_RECOLOR_COLORS);
+const $recolorPalette = $('recolor-palette');
+for (let i = 0; i < MAX_RECOLOR_COLORS; i++) {
+    const d = document.createElement('div');
+    d.className = 'recolor-swatch';
+    $recolorPalette.appendChild(d);
+    _recolorSwatches[i] = d;
+}
+
+// Fill the palette scratch from the OKLCH stop objects (or a shifted variant)
+function fillRecolorPalette(hueShift) {
+    _recolorPaletteN = RECOLOR_PALETTE_STOPS.length;
+    for (let i = 0; i < _recolorPaletteN; i++) {
+        const s = RECOLOR_PALETTE_STOPS[i];
+        _recolorPaletteLch[i * 3]     = s.l;
+        _recolorPaletteLch[i * 3 + 1] = s.c;
+        _recolorPaletteLch[i * 3 + 2] = hueShift === 0 ? s.h : (((s.h + hueShift) % 360) + 360) % 360;
+    }
+}
+
+function paintRecolorSwatches() {
+    // Update the swatch bar to reflect current (possibly shifted) palette.
+    const packTmp = new Float32Array(3);
+    for (let i = 0; i < MAX_RECOLOR_COLORS; i++) {
+        const el = _recolorSwatches[i];
+        if (i < _recolorPaletteN) {
+            packTmp[0] = _recolorPaletteLch[i * 3];
+            packTmp[1] = _recolorPaletteLch[i * 3 + 1];
+            packTmp[2] = _recolorPaletteLch[i * 3 + 2];
+            const u32 = packOklchBufferToUint32(packTmp, 0, 1);
+            const r = u32 & 0xFF, g = (u32 >>> 8) & 0xFF, b = (u32 >>> 16) & 0xFF;
+            const hex = '#' + [r, g, b].map(v => v.toString(16).padStart(2, '0')).join('');
+            el.style.setProperty('--sw', hex);
+            el.title = `oklch(${packTmp[0].toFixed(2)} ${packTmp[1].toFixed(2)} ${packTmp[2].toFixed(0)})`;
+            el.classList.add('active');
+        } else {
+            el.classList.remove('active');
+        }
+    }
+}
+
+// Boot-time procedural motif: soft OKLCH blobs, seeded, deterministic.
+function drawRecolorMotif(seed) {
+    let a = seed | 0;
+    const rand = () => {
+        a = (a + 0x6D2B79F5) | 0;
+        let t = a;
+        t = Math.imul(t ^ (t >>> 15), t | 1);
+        t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+    // Background: warm gradient
+    const bg = rSrcCtx.createRadialGradient(RW/2, RH*0.35, 20, RW/2, RH/2, RW * 0.75);
+    bg.addColorStop(0, 'oklch(0.82 0.10 60)');
+    bg.addColorStop(1, 'oklch(0.55 0.14 30)');
+    rSrcCtx.fillStyle = bg;
+    rSrcCtx.fillRect(0, 0, RW, RH);
+    const hueSeeds = [180, 260, 20, 130, 320];
+    rSrcCtx.globalCompositeOperation = 'multiply';
+    for (let i = 0; i < 7; i++) {
+        const cx = RW * (0.15 + rand() * 0.7);
+        const cy = RH * (0.15 + rand() * 0.7);
+        const rMax = RW * (0.22 + rand() * 0.18);
+        const hue = hueSeeds[i % hueSeeds.length] + (rand() - 0.5) * 30;
+        const L = 0.55 + rand() * 0.25;
+        const C = 0.14 + rand() * 0.10;
+        const grad = rSrcCtx.createRadialGradient(cx, cy, 5, cx, cy, rMax);
+        grad.addColorStop(0, `oklch(${L} ${C} ${hue})`);
+        grad.addColorStop(0.6, `oklch(${L*0.92} ${C*0.7} ${hue})`);
+        grad.addColorStop(1, `oklch(${L*0.85} ${C*0.3} ${hue} / 0)`);
+        rSrcCtx.fillStyle = grad;
+        rSrcCtx.beginPath();
+        rSrcCtx.arc(cx, cy, rMax, 0, Math.PI * 2);
+        rSrcCtx.fill();
+    }
+    rSrcCtx.globalCompositeOperation = 'source-over';
+    // Store a copy of the motif for remap input.
+    const raw = rSrcCtx.getImageData(0, 0, RW, RH);
+    _rSrcImage.data.set(raw.data);
+}
+
+let recolorShift = 0;
+let recolorPreserve = true;
+
+function paintRecolor() {
+    fillRecolorPalette(recolorShift);
+    paintRecolorSwatches();
+    const t0 = performance.now();
+    remapPixelsToPalette(
+        _rSrcImage.data,
+        _recolorPaletteLch,
+        _rOutU32,
+        RW * RH,
+        _recolorPaletteN,
+        { preserveLightness: recolorPreserve }
+    );
+    rOutCtx.putImageData(_rOutImage, 0, 0);
+    $('recolor-time').textContent = (performance.now() - t0).toFixed(1) + ' ms';
+}
+
+$('recolor-shift').addEventListener('input', e => {
+    recolorShift = +e.target.value;
+    $('recolor-shift-v').textContent = recolorShift + '°';
+    paintRecolor();
+});
+$('recolor-preserve').addEventListener('change', e => {
+    recolorPreserve = e.target.checked;
+    paintRecolor();
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// SECTION 06 — Benchmark
+// ═══════════════════════════════════════════════════════════════════
+
+function animateBar(id, pct) {
+    // Drive the fill via a CSS custom property — no inline style attribute set.
+    $(id).style.setProperty('--fill-right', (100 - pct) + '%');
+}
+
+$('run-bench').addEventListener('click', async () => {
+    const btn = $('run-bench');
+    btn.disabled = true;
+    btn.textContent = 'Running…';
+
+    // 1. parseCSSColor
+    await new Promise(r => setTimeout(r, 40));
+    {
+        const buf = new Float32Array(3);
+        const colors = ['#ff0000', 'rgb(255,128,64)', 'oklch(70% 0.2 120)', 'hsl(220 80% 50%)'];
+        const N = 300_000;
+        const t0 = performance.now();
+        for (let i = 0; i < N; i++) parseCSSColor(colors[i & 3], buf, 0);
+        const dt = performance.now() - t0;
+        const persec = (N * 1000 / dt) | 0;
+        $('b1-n').textContent = (persec / 1_000_000).toFixed(1) + 'M';
+        animateBar('b1-bar', Math.min(100, persec / 5_000_000 * 100));
+    }
+
+    // 2. lerpOklchBuffer
+    await new Promise(r => setTimeout(r, 40));
+    {
+        const A = new Float32Array([0.7, 0.2, 30]);
+        const B = new Float32Array([0.4, 0.15, 250]);
+        const O = new Float32Array(3);
+        const N = 2_000_000;
+        const t0 = performance.now();
+        for (let i = 0; i < N; i++) lerpOklchBuffer(A, 0, B, 0, (i & 1023) / 1023, O, 0);
+        const dt = performance.now() - t0;
+        const persec = (N * 1000 / dt) | 0;
+        $('b2-n').textContent = (persec / 1_000_000).toFixed(1) + 'M';
+        animateBar('b2-bar', Math.min(100, persec / 50_000_000 * 100));
+    }
+
+    // 3. packOklchBufferToUint32
+    await new Promise(r => setTimeout(r, 40));
+    {
+        const buf = new Float32Array([0.7, 0.2, 30]);
+        const N = 2_000_000;
+        const t0 = performance.now();
+        let acc = 0;
+        for (let i = 0; i < N; i++) acc ^= packOklchBufferToUint32(buf, 0, 1);
+        const dt = performance.now() - t0;
+        const persec = (N * 1000 / dt) | 0;
+        $('b3-n').textContent = (persec / 1_000_000).toFixed(1) + 'M';
+        animateBar('b3-bar', Math.min(100, persec / 10_000_000 * 100));
+        if (acc === 7) console.log('benchmark guard');
+    }
+
+    // 4. packOklchBufferToUint32MINDE  (NEW)
+    await new Promise(r => setTimeout(r, 40));
+    {
+        // Slightly out-of-gamut input to exercise the bisection path
+        const buf = new Float32Array([0.60, 0.30, 20]);
+        const N = 200_000;
+        const t0 = performance.now();
+        let acc = 0;
+        for (let i = 0; i < N; i++) acc ^= packOklchBufferToUint32MINDE(buf, 0, 1);
+        const dt = performance.now() - t0;
+        const persec = (N * 1000 / dt) | 0;
+        $('b4-n').textContent = (persec / 1_000).toFixed(0) + 'k';
+        animateBar('b4-bar', Math.min(100, persec / 500_000 * 100));
+        if (acc === 7) console.log('benchmark guard');
+    }
+
+    // 5. remapPixelsToPalette  (NEW)
+    await new Promise(r => setTimeout(r, 40));
+    {
+        const size = 1000;                         // 1000 × 1000 = 1 Mpx
+        const inU8 = new Uint8ClampedArray(size * size * 4);
+        for (let i = 0; i < inU8.length; i += 4) {
+            inU8[i]     = (i * 17) & 255;
+            inU8[i + 1] = (i * 31) & 255;
+            inU8[i + 2] = (i * 47) & 255;
+            inU8[i + 3] = 255;
+        }
+        const outU32 = new Uint32Array(size * size);
+        const paletteLch = new Float32Array(15);
+        for (let i = 0; i < 5; i++) {
+            paletteLch[i * 3]     = 0.3 + i * 0.15;
+            paletteLch[i * 3 + 1] = 0.15;
+            paletteLch[i * 3 + 2] = i * 72;
+        }
+        const t0 = performance.now();
+        remapPixelsToPalette(inU8, paletteLch, outU32, size * size, 5);
+        const dt = performance.now() - t0;
+        const mpxsec = (size * size / dt) / 1000; // Mpx/sec
+        $('b5-n').textContent = mpxsec.toFixed(1);
+        animateBar('b5-bar', Math.min(100, mpxsec / 50 * 100));
+    }
+
+    // 6. deltaEOK  (NEW)
+    await new Promise(r => setTimeout(r, 40));
+    {
+        const A = new Float32Array([0.55, 0.15, 100]);
+        const B = new Float32Array([0.62, 0.18, 190]);
+        const N = 10_000_000;
+        const t0 = performance.now();
+        let acc = 0;
+        for (let i = 0; i < N; i++) acc += deltaEOK(A, 0, B, 0);
+        const dt = performance.now() - t0;
+        const persec = (N * 1000 / dt) | 0;
+        $('b6-n').textContent = (persec / 1_000_000).toFixed(1) + 'M';
+        animateBar('b6-bar', Math.min(100, persec / 200_000_000 * 100));
+        if (acc === 42) console.log('benchmark guard');
+    }
+
+    btn.disabled = false;
+    btn.textContent = '▶ Re-run Benchmarks';
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// BOOT
+// ═══════════════════════════════════════════════════════════════════
+
+paintPerceptualProof();
+renderStops();
+rebuildLUT();
+reseed(2000);
+requestAnimationFrame(tick);
+paintGamut();
+drawRecolorMotif(1337);
+paintRecolor();
+
+</script>
+</body>
+</html>
