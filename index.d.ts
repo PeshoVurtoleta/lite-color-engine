@@ -156,6 +156,22 @@ export function lerpOklchBuffer(
 ): void;
 
 /**
+ * Batch lerp for particle systems / high-N use cases. Amortizes JS call overhead.
+ *
+ * Lerps n triplets with shared `t`: a[offA + i*3...] <-> b[offB + i*3...] -> out[offOut + i*3...]
+ */
+export function lerpOklchBufferN(
+    a: Float32Array,
+    offA: number,
+    b: Float32Array,
+    offB: number,
+    t: number,
+    out: Float32Array,
+    offOut: number,
+    n: number
+): void;
+
+/**
  * Encodes an OKLCH triplet to a 32-bit unsigned integer in **little-endian
  * RGBA** byte order - the format consumed directly by `Canvas ImageData` via
  * a `Uint32Array` view.
@@ -195,6 +211,20 @@ export function packOklchBufferToUint32Fast(
     offset: number,
     alpha?: number
 ): number;
+
+/**
+ * Batch packer: n OKLCH triplets -> n Uint32 packed colors (stride 1 in dst).
+ * Opt-in 4k sRGB LUT (`useLut=true`) for fast-packer throughput at near-exact accuracy.
+ */
+export function packOklchBufferToUint32IntoN(
+    src: Float32Array,
+    offSrc: number,
+    dst: Uint32Array,
+    offDst: number,
+    n: number,
+    alpha?: number,
+    useLut?: boolean
+): void;
 
 /**
  * Encodes an OKLCH triplet to a 32-bit unsigned integer in little-endian RGBA

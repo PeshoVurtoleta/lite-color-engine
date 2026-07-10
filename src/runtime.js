@@ -37,8 +37,49 @@ export const lerpOklchBuffer = (bufA, offsetA, bufB, offsetB, t, outBuf, outOffs
 };
 
 /**
+ * Batch sibling of {@link lerpOklchBuffer}. Interpolates `n` consecutive OKLCH
+ * triplets (stride 3) with a single shared `t`, amortizing per-call overhead
+ * across large particle systems (100k+ entities).
+ *
+ * For each i in [0, n): lerps a[offA + i*3 ..] with b[offB + i*3 ..] into
+ * out[offOut + i*3 ..]. Per-triplet math is identical to the scalar version,
+ * so results are bit-for-bit equal to calling it n times.
+ *
+ * In-place is safe (a === out, offA === offOut): each iteration reads its three
+ * source lanes before writing them. Zero allocations; monomorphic hot loop.
+ *
+ * @param {Float32Array} a - Source buffer A
+ * @param {number} offA - Base offset of the first color in A
+ * @param {Float32Array} b - Source buffer B
+ * @param {number} offB - Base offset of the first color in B
+ * @param {number} t - Interpolation factor [0, 1] (extrapolates then clamps)
+ * @param {Float32Array} out - Destination buffer
+ * @param {number} offOut - Base offset of the first output color
+ * @param {number} n - Number of triplets to process (n <= 0 is a no-op)
+ * @returns {void}
+ */
+export const lerpOklchBufferN = (a, offA, b, offB, t, out, offOut, n) => {
+    if (n <= 0) return;
+    for (let i = 0; i < n; i++) {
+        const ia = offA + i * 3;
+        const ib = offB + i * 3;
+        const io = offOut + i * 3;
+
+        const l = lerp(a[ia], b[ib], t);
+        out[io] = l < 0 ? 0 : (l > 1 ? 1 : l);
+
+        const c = lerp(a[ia + 1], b[ib + 1], t);
+        out[io + 1] = c < 0 ? 0 : c;
+
+        let h = lerpAngle(a[ia + 2], b[ib + 2], t);
+        h = h % 360;
+        out[io + 2] = h < 0 ? h + 360 : h;
+    }
+};
+
+/**
  * Internal: shared OKLCH -> linear sRGB kernel.
- * Inlined into both pack variants for V8 to monomorphize.
+ * Inlined into every sRGB pack variant so V8 monomorphizes it.
  *
  * Returns a 3-tuple via `outRgb` (length 3). Strictly clamped to [0, 1].
  * @internal
@@ -60,7 +101,7 @@ const oklchToLinearSrgbClamped = (l, c, h, outRgb) => {
     const g = -1.2684380046 * lms_l + 2.6097574011 * lms_m - 0.3413193965 * lms_s;
     const b = -0.0041960863 * lms_l - 0.7034186147 * lms_m + 1.7076147010 * lms_s;
 
-    // Hard gamut clamp (fast path; replaces the expensive MINDE algorithm).
+    // Hard gamut clamp (fast path; MINDE chroma reduction lives on the /gamut subpath).
     outRgb[0] = r < 0 ? 0 : (r > 1 ? 1 : r);
     outRgb[1] = g < 0 ? 0 : (g > 1 ? 1 : g);
     outRgb[2] = b < 0 ? 0 : (b > 1 ? 1 : b);
@@ -69,6 +110,34 @@ const oklchToLinearSrgbClamped = (l, c, h, outRgb) => {
 // Module-level scratch (zero-GC: single allocation at module load).
 const _scratchRgb = new Float32Array(3);
 const _scratchRgbP3 = new Float32Array(3);
+
+/**
+ * Precomputed 4096-entry LUT for the sRGB transfer (linear -> encoded byte).
+ * Entry i corresponds to linear value i/4095, so the table spans [0, 1] exactly.
+ * The linear branch (slope 12.92) is the steepest region; at 4096 samples its
+ * per-step delta is < 1 byte, so nearest-index lookups stay within ~1 LSB of
+ * the exact pow() encoding. One-time module-load cost, then O(1) lookup.
+ * @internal
+ */
+const SRGB_LUT = new Uint8ClampedArray(4096);
+{
+    for (let i = 0; i < 4096; i++) {
+        const c = i / 4095;
+        const enc = c <= 0.0031308 ? 12.92 * c : 1.055 * Math.pow(c, 1 / 2.4) - 0.055;
+        SRGB_LUT[i] = (enc * 255 + 0.5) | 0;
+    }
+}
+
+/**
+ * LUT-based linear-to-sRGB byte using nearest-index lookup. Near-exact (~1 LSB)
+ * versus {@link linearToSrgbByte} but branch-free and pow-free on the hot path.
+ * @internal
+ */
+const linearToSrgbByteLut = (c) => {
+    if (c <= 0) return 0;
+    if (c >= 1) return 255;
+    return SRGB_LUT[(c * 4095 + 0.5) | 0];
+};
 
 /**
  * Encodes a linear-light channel (already clamped to [0, 1]) to an sRGB
@@ -136,8 +205,54 @@ export const packOklchBufferToUint32Fast = (buf, offset, alpha = 1.0) => {
 };
 
 /**
- * Internal helper: OKLCH -> linear Display P3 with hard clamp to [0,1].
- * Mirrors the structure of oklchToLinearSrgbClamped but targets the wider P3 gamut.
+ * Batch sibling of {@link packOklchBufferToUint32}. Packs `n` OKLCH triplets
+ * (stride 3, from `src`) into `n` consecutive Uint32 pixels (stride 1, into
+ * `dst`) - the shape a SoA particle system feeds straight into `ImageData`.
+ *
+ * With `useLut=false` the output is bit-for-bit identical to calling
+ * {@link packOklchBufferToUint32} n times. With `useLut=true` it uses the 4k
+ * transfer LUT: near-exact (~1 LSB) at close to fast-packer throughput, with a
+ * single one-time table allocation and no per-color pow(). The branch is hoisted
+ * out of the loop so each variant stays monomorphic.
+ *
+ * @param {Float32Array} src - Source OKLCH buffer (stride 3)
+ * @param {number} offSrc - Base offset of the first triplet in src
+ * @param {Uint32Array} dst - Destination packed-color buffer (stride 1)
+ * @param {number} offDst - Base offset of the first packed color in dst
+ * @param {number} n - Number of colors to pack (n <= 0 is a no-op)
+ * @param {number} [alpha=1.0] - Shared alpha for all n colors
+ * @param {boolean} [useLut=false] - Opt in to the 4k LUT transfer (near-exact, faster)
+ * @returns {void}
+ */
+export const packOklchBufferToUint32IntoN = (src, offSrc, dst, offDst, n, alpha = 1.0, useLut = false) => {
+    if (n <= 0) return;
+    const a8 = alpha <= 0 ? 0 : (alpha >= 1 ? 255 : (alpha * 255 + 0.5) | 0);
+    const aHi = a8 << 24;
+
+    if (useLut) {
+        for (let i = 0; i < n; i++) {
+            const io = offSrc + i * 3;
+            oklchToLinearSrgbClamped(src[io], src[io + 1], src[io + 2], _scratchRgb);
+            const r8 = linearToSrgbByteLut(_scratchRgb[0]);
+            const g8 = linearToSrgbByteLut(_scratchRgb[1]);
+            const b8 = linearToSrgbByteLut(_scratchRgb[2]);
+            dst[offDst + i] = (aHi | (b8 << 16) | (g8 << 8) | r8) >>> 0;
+        }
+    } else {
+        for (let i = 0; i < n; i++) {
+            const io = offSrc + i * 3;
+            oklchToLinearSrgbClamped(src[io], src[io + 1], src[io + 2], _scratchRgb);
+            const r8 = linearToSrgbByte(_scratchRgb[0]);
+            const g8 = linearToSrgbByte(_scratchRgb[1]);
+            const b8 = linearToSrgbByte(_scratchRgb[2]);
+            dst[offDst + i] = (aHi | (b8 << 16) | (g8 << 8) | r8) >>> 0;
+        }
+    }
+};
+
+/**
+ * Internal helper: OKLCH -> linear Display P3 with hard clamp to [0, 1].
+ * Mirrors oklchToLinearSrgbClamped but targets the wider P3 gamut.
  * @internal
  */
 const oklchToLinearP3Clamped = (l, c, h, outRgb) => {

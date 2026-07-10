@@ -3,10 +3,9 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>lite-color-engine · oscilloscope</title>
+  <title>lite-color-engine v1.3 - oscilloscope</title>
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Space+Mono:wght@400;700&display=swap"
-        rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
   <style>
     *, *::before, *::after { box-sizing: border-box; }
 
@@ -20,18 +19,12 @@
       --text: #d8d6d2;
       --text-dim: #8b8d94;
       --text-faint: #555960;
-      --green: #5fe39f;
-      --green: oklch(83% 0.14 158);
+      --green: #5fe39f;        --green: oklch(83% 0.14 158);
       --green-dim: #2b7a52;
-      --cyan: #7dd3fc;
-      --cyan: oklch(83% 0.09 232);
-      --amber: #f5b942;
-      --amber: oklch(81% 0.14 82);
-      --magenta: #e879a8;
-      --magenta: oklch(72% 0.13 356);
-      --red: #f87171;
+      --cyan: #7dd3fc;         --cyan: oklch(83% 0.09 232);
+      --amber: #f5b942;        --amber: oklch(81% 0.14 82);
+      --magenta: #e879a8;      --magenta: oklch(72% 0.13 356);
       --glow-green: 0 0 12px rgba(95, 227, 159, 0.6), 0 0 30px rgba(95, 227, 159, 0.22);
-      --glow-magenta: 0 0 12px rgba(232, 121, 168, 0.5);
     }
 
     html, body { height: 100%; margin: 0; }
@@ -71,19 +64,14 @@
     #app { position: relative; z-index: 2; height: 100vh; display: flex; flex-direction: column; }
 
     header.top {
-      display: flex;
-      align-items: center;
-      gap: 24px;
-      padding: 14px 24px;
-      border-bottom: 1px solid var(--line);
+      display: flex; align-items: center; gap: 24px;
+      padding: 14px 24px; border-bottom: 1px solid var(--line);
       background: linear-gradient(to bottom, var(--bg-1), var(--bg-0));
     }
-
     .brand { display: flex; align-items: baseline; gap: 12px; font-family: 'Space Mono', 'JetBrains Mono', monospace; }
     .brand .mark { color: var(--green); font-weight: 700; font-size: 16px; text-shadow: var(--glow-green); }
     .brand .pkg { color: var(--text); font-weight: 700; font-size: 15px; }
     .brand .ver { color: var(--text-faint); font-size: 11px; }
-
     .tagline { color: var(--text-dim); font-size: 11px; margin-left: auto; letter-spacing: 0.04em; text-transform: uppercase; }
     .tagline .dot {
       display: inline-block; width: 7px; height: 7px; border-radius: 50%;
@@ -109,7 +97,13 @@
     .scene { flex: 1; display: none; min-height: 0; }
     .scene[data-active] { display: flex; }
 
-    .stage { flex: 1; min-height: 0; position: relative; overflow: hidden; }
+    .stage { flex: 1; min-height: 0; position: relative; overflow: hidden; background: #000; }
+    .stage.split { display: flex; gap: 1px; background: var(--line); }
+    .tier-cell { flex: 1; position: relative; background: #000; }
+    .tier-label {
+      position: absolute; top: 12px; left: 12px; font-size: 10px; letter-spacing: 0.1em;
+      color: var(--text); background: rgba(0,0,0,0.6); padding: 2px 8px; border-radius: 2px;
+    }
     canvas { display: block; width: 100%; height: 100%; }
 
     .panel { width: 320px; border-left: 1px solid var(--line); background: var(--bg-1); display: flex; flex-direction: column; overflow-y: auto; }
@@ -123,7 +117,7 @@
 
     button.btn {
       font-family: inherit; font-size: 11px; letter-spacing: 0.05em; text-transform: uppercase;
-      background: var(--bg-3); color: var(--text); border: 1px solid var(--line-strong); padding: 8px 14px; cursor: pointer; transition: all .12s;
+      background: var(--bg-3); color: var(--text); border: 1px solid var(--line-strong); padding: 8px 14px; cursor: pointer; transition: color .12s, background .12s, border-color .12s;
     }
     @media (hover: hover) { button.btn:hover { background: var(--bg-2); border-color: var(--green-dim); color: var(--green); } }
     button.btn.primary { background: var(--green-dim); color: var(--bg-0); border-color: var(--green); font-weight: 700; }
@@ -131,12 +125,9 @@
     .btn-row { display: flex; gap: 6px; flex-wrap: wrap; }
 
     .field { margin-bottom: 12px; }
+    .field:last-child { margin-bottom: 0; }
     .field label { display: flex; justify-content: space-between; font-size: 10px; letter-spacing: 0.08em; color: var(--text-faint); text-transform: uppercase; margin-bottom: 4px; }
     .field input[type="range"] { width: 100%; accent-color: var(--green); }
-    .field select {
-      width: 100%; background: var(--bg-3); border: 1px solid var(--line-strong); color: var(--text);
-      font-family: inherit; font-size: 12px; padding: 6px 8px;
-    }
     .field-value { color: var(--green); font-weight: 700; font-variant-numeric: tabular-nums; }
 
     .metrics { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
@@ -146,189 +137,147 @@
     .metric .v.green { color: var(--green); }
     .metric .v.cyan { color: var(--cyan); }
     .metric .v.amber { color: var(--amber); }
-    .metric .v.magenta { color: var(--magenta); }
 
-    .stage-overlay { position: absolute; pointer-events: none; color: var(--text-dim); font-size: 11px; letter-spacing: 0.05em; }
-    .stage-overlay.tl { top: 14px; left: 18px; }
-    .stage-overlay.tr { top: 14px; right: 18px; text-align: right; }
-    .stage-overlay.bl { bottom: 14px; left: 18px; }
-    .stage-overlay.br { bottom: 14px; right: 18px; text-align: right; }
-    .stage-overlay .label { font-size: 9px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--text-faint); }
-    .stage-overlay .big { display: block; color: var(--green); font-size: 20px; font-weight: 500; font-variant-numeric: tabular-nums; text-shadow: var(--glow-green); }
+    .lutstrip { width: 100%; height: 16px; display: block; border: 1px solid var(--line-strong); image-rendering: pixelated; }
 
-    .readout {
-      position: absolute; top: 14px; left: 50%; transform: translateX(-50%);
-      display: flex; align-items: center; gap: 10px;
-      background: rgba(13, 17, 23, 0.82); border: 1px solid var(--line-strong);
-      padding: 7px 12px; font-size: 11px; pointer-events: none;
+    .overlay {
+      position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+      background: rgba(7, 9, 13, 0.72); cursor: pointer; z-index: 3; transition: opacity .35s;
     }
-    .readout .sw { width: 26px; height: 26px; border-radius: 3px; border: 1px solid var(--line-strong); background: var(--sw, #000); }
-    .readout .hex { color: var(--text); font-weight: 700; letter-spacing: 0.04em; }
-    .readout .lch { color: var(--text-dim); }
-
-    .swrow { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
-    .chip {
-      width: 34px; height: 22px; border-radius: 3px; border: 1px solid var(--line-strong);
-      background: var(--c, #000); cursor: pointer;
+    .overlay.gone { opacity: 0; pointer-events: none; }
+    .overlay .card {
+      text-align: center; border: 1px solid var(--line-strong); background: var(--bg-1);
+      padding: 22px 30px; box-shadow: var(--glow-green);
     }
-    .c-green { color: var(--green); }
-    .c-cyan { color: var(--cyan); }
-    .legend { display: flex; gap: 14px; }
-    .lchip { display: flex; align-items: center; gap: 6px; font-size: 10px; color: var(--text-dim); }
-    .lswatch { width: 9px; height: 9px; border-radius: 2px; background: var(--sw, var(--green)); box-shadow: 0 0 8px var(--sw, var(--green)); }
+    .overlay .card .big { color: var(--green); font-size: 15px; font-weight: 700; letter-spacing: 0.04em; }
+    .overlay .card .sub { color: var(--text-dim); font-size: 11px; margin-top: 6px; }
+
+    .note { color: var(--text-dim); font-size: 11px; line-height: 1.6; margin: 0; }
+    .note code { color: var(--cyan); background: var(--bg-3); padding: 0 4px; border-radius: 2px; }
+    .mt-s { margin-top: 8px; }
+    .mt-m { margin-top: 12px; }
   </style>
 </head>
 <body>
 <div id="app">
   <header class="top">
     <div class="brand">
-      <span class="mark">◐</span>
+      <span class="mark">&#9680;</span>
       <span class="pkg">@zakkster/lite-color-engine</span>
-      <span class="ver">v1.2.0</span>
+      <span class="ver">v1.3.0</span>
     </div>
-    <div class="tagline"><span class="dot"></span>oscilloscope · OKLCH color engine</div>
+    <div class="tagline"><span class="dot"></span>oscilloscope &middot; zero-GC OKLCH</div>
   </header>
 
   <nav class="tabs" id="tabs">
-    <button data-tab="grad" aria-current="true"><span class="scene-num">01</span>Gradient Lab</button>
-    <button data-tab="gamut"><span class="scene-num">02</span>Gamut Wheel</button>
-    <button data-tab="remap"><span class="scene-num">03</span>Palette Remap</button>
+    <button data-tab="field" aria-current="true"><span class="scene-num">01</span>Particle Field</button>
+    <button data-tab="batch" aria-current="false"><span class="scene-num">02</span>Batch Kernels</button>
+    <button data-tab="tiers" aria-current="false"><span class="scene-num">03</span>Accuracy Tiers</button>
   </nav>
 
   <main>
-    <!-- ─── SCENE 01 · GRADIENT LAB ─── -->
-    <section class="scene" data-scene="grad" data-active>
-      <div class="stage" id="grad-stage">
-        <canvas id="grad-canvas"></canvas>
-        <div class="stage-overlay tl"><span class="label">OKLCH · perceptual</span></div>
-        <div class="stage-overlay" id="grad-mid-label"><span class="label">sRGB · linear channel lerp</span></div>
-        <div class="stage-overlay bl"><span class="label">ΔE-OK per step&nbsp;&nbsp;<span class="c-green">▮ OKLCH</span>&nbsp;<span class="c-cyan">▮ sRGB</span></span></div>
-        <div class="readout" id="grad-readout">
-          <div class="sw" id="grad-sw"></div>
-          <div><span class="hex" id="grad-hex">#000000</span><br><span class="lch" id="grad-lch">L — C — H —</span></div>
+    <!-- SCENE 01 - PARTICLE FIELD (100k hero) -->
+    <section class="scene" data-scene="field" data-active>
+      <div class="stage">
+        <canvas id="field-canvas"></canvas>
+        <div class="overlay" id="field-overlay">
+          <div class="card">
+            <div class="big">100,000 OKLCH particles</div>
+            <div class="sub">click / tap to ignite &middot; hold to attract</div>
+          </div>
         </div>
       </div>
       <aside class="panel">
-        <div class="panel-head">scene 01 · perceptual gradients</div>
+        <div class="panel-head">Particle Field</div>
         <section>
           <p class="help-line">
-            The same stops interpolated two ways. <code>lerpOklchBuffer</code> +
-            <code>bakeGradientToUint32</code> stay <strong>vivid and evenly spaced</strong>;
-            naive sRGB channel-lerp dips through <strong>muddy midtones</strong>. The ribbon is
-            <code>deltaEOK</code> between adjacent samples — flat means perceptually uniform.
+            100k particles, each colored by its life through a baked
+            <code>bakeGradientToUint32</code> LUT sampled with zero-GC
+            <code>sampleColorLUT</code>. Additive plotting builds the glow.
           </p>
+          <canvas id="field-lut" class="lutstrip" width="512" height="16"></canvas>
         </section>
         <section>
-          <h3>Stops</h3>
-          <div class="field">
-            <label>preset</label>
-            <select id="grad-preset">
-              <option value="0">Blue → Gold (complementary)</option>
-              <option value="1" selected>Spectrum (blue·violet·orange·teal)</option>
-              <option value="2">Cyan → Red</option>
-              <option value="3">Sunset</option>
-            </select>
+          <h3>Gradient</h3>
+          <div class="btn-row">
+            <button class="btn" id="field-grad" type="button">AURORA</button>
+            <button class="btn" id="field-recolor" type="button">Recolor (batch)</button>
           </div>
-          <div class="field">
-            <label>easing</label>
-            <select id="grad-ease">
-              <option value="lin">linear</option>
-              <option value="smooth" selected>smoothstep</option>
-              <option value="io">ease-in-out</option>
-            </select>
-          </div>
+          <p class="note mt-s">Keys <code>1-4</code> select a palette.</p>
         </section>
         <section>
-          <h3>Uniformity</h3>
-          <div class="metrics">
-            <div class="metric"><div class="k">OKLCH max step</div><div class="v green" id="grad-omax">0</div></div>
-            <div class="metric"><div class="k">sRGB max step</div><div class="v cyan" id="grad-smax">0</div></div>
-            <div class="metric"><div class="k">sRGB spikier</div><div class="v magenta" id="grad-ratio">1×</div></div>
-            <div class="metric"><div class="k">lut entries</div><div class="v amber" id="grad-res">0</div></div>
-          </div>
-        </section>
-      </aside>
-    </section>
-
-    <!-- ─── SCENE 02 · GAMUT WHEEL ─── -->
-    <section class="scene" data-scene="gamut">
-      <div class="stage" id="gamut-stage">
-        <canvas id="gamut-canvas"></canvas>
-        <div class="stage-overlay tl"><span class="label">hard clamp</span></div>
-        <div class="stage-overlay tr"><span class="label">MINDE map</span></div>
-        <div class="stage-overlay br"><span class="label">◜ white ring = sRGB gamut boundary</span></div>
-      </div>
-      <aside class="panel">
-        <div class="panel-head">scene 02 · gamut mapping</div>
-        <section>
-          <p class="help-line">
-            A hue wheel at fixed lightness — radius is chroma. Beyond the sRGB boundary,
-            the <strong>left half</strong> hard-clamps channels (hue drifts); the
-            <strong>right half</strong> runs <code>gamutMapToSrgbBuffer</code> (MINDE), reducing
-            chroma at fixed L and H so the hue stays true.
-          </p>
-          <button class="btn primary" id="gamut-spin" aria-pressed="true">◐ sweep lightness</button>
-        </section>
-        <section>
-          <h3>Slice</h3>
+          <h3>Simulation</h3>
           <div class="field">
-            <label>lightness L <span class="field-value" id="gamut-l-v">0.72</span></label>
-            <input type="range" id="gamut-l" min="0.15" max="0.95" step="0.01" value="0.72">
+            <label>Swirl <span class="field-value" id="field-swirl-v">0.06</span></label>
+            <input type="range" id="field-swirl" min="0" max="0.16" step="0.01" value="0.06">
           </div>
-          <div class="field">
-            <label>max chroma <span class="field-value" id="gamut-c-v">0.37</span></label>
-            <input type="range" id="gamut-c" min="0.20" max="0.45" step="0.01" value="0.37">
+          <div class="btn-row">
+            <button class="btn" id="field-count" type="button">100k</button>
+            <button class="btn primary" id="field-play" type="button">Pause</button>
           </div>
         </section>
         <section>
           <h3>Telemetry</h3>
           <div class="metrics">
-            <div class="metric"><div class="k">out of gamut</div><div class="v magenta" id="gamut-oog">0%</div></div>
-            <div class="metric"><div class="k">fps</div><div class="v green" id="gamut-fps">60</div></div>
+            <div class="metric"><div class="k">FPS</div><div class="v green" id="field-fps">--</div></div>
+            <div class="metric"><div class="k">Frame</div><div class="v" id="field-ms">--</div></div>
+            <div class="metric"><div class="k">Particles</div><div class="v cyan" id="field-n">--</div></div>
+            <div class="metric"><div class="k">Recycled/s</div><div class="v amber" id="field-rec">--</div></div>
           </div>
         </section>
       </aside>
     </section>
 
-    <!-- ─── SCENE 03 · PALETTE REMAP ─── -->
-    <section class="scene" data-scene="remap">
-      <div class="stage" id="remap-stage">
-        <canvas id="remap-canvas"></canvas>
-        <div class="stage-overlay tl"><span class="label">source</span></div>
-        <div class="stage-overlay tr"><span class="label" id="remap-mode-label">remapped · shading preserved</span></div>
-      </div>
+    <!-- SCENE 02 - BATCH KERNELS -->
+    <section class="scene" data-scene="batch">
+      <div class="stage"><canvas id="batch-canvas"></canvas></div>
       <aside class="panel">
-        <div class="panel-head">scene 03 · palette remap</div>
+        <div class="panel-head">Batch Kernels (v1.3)</div>
         <section>
           <p class="help-line">
-            <code>remapPixelsToPalette</code> finds each pixel's nearest palette color by
-            <code>deltaEOK</code> in OKLab. With <strong>preserve lightness</strong> it keeps the
-            source's shading and swaps only chroma — the recolor look under
-            <code>lite-hueforge</code>.
+            The whole gradient crossfades between a cool and a warm gradient with a single
+            <code>lerpOklchBufferN</code> call, then the entire row is packed with
+            <code>packOklchBufferToUint32IntoN</code>. Toggle the LUT to watch pack time drop.
           </p>
-          <button class="btn primary" id="remap-preserve" aria-pressed="true">preserve lightness</button>
         </section>
         <section>
-          <h3>Palette</h3>
-          <div class="field">
-            <label>preset</label>
-            <select id="remap-preset">
-              <option value="0" selected>Phosphor</option>
-              <option value="1">Ember</option>
-              <option value="2">Ice</option>
-              <option value="3">Viridian</option>
-            </select>
+          <h3>Transfer</h3>
+          <div class="btn-row">
+            <button class="btn" id="batch-lut" type="button" aria-pressed="false">useLut: off</button>
           </div>
-          <div class="swrow" id="remap-chips"></div>
+          <div class="field mt-m">
+            <label>Morph speed <span class="field-value" id="batch-speed-v">1.0x</span></label>
+            <input type="range" id="batch-speed" min="0.1" max="3" step="0.1" value="1.0">
+          </div>
         </section>
         <section>
           <h3>Telemetry</h3>
           <div class="metrics">
-            <div class="metric"><div class="k">pixels / frame</div><div class="v cyan" id="remap-px">0</div></div>
-            <div class="metric"><div class="k">palette</div><div class="v green" id="remap-pal">0</div></div>
-            <div class="metric"><div class="k">mode</div><div class="v magenta" id="remap-mode">preserve</div></div>
-            <div class="metric"><div class="k">fps</div><div class="v amber" id="remap-fps">60</div></div>
+            <div class="metric"><div class="k">FPS</div><div class="v green" id="batch-fps">--</div></div>
+            <div class="metric"><div class="k">Pack / row</div><div class="v cyan" id="batch-pack">--</div></div>
+            <div class="metric"><div class="k">Columns</div><div class="v" id="batch-cols">--</div></div>
+            <div class="metric"><div class="k">Mode</div><div class="v amber" id="batch-mode">accurate</div></div>
           </div>
+        </section>
+      </aside>
+    </section>
+
+    <!-- SCENE 03 - ACCURACY TIERS -->
+    <section class="scene" data-scene="tiers">
+      <div class="stage split">
+        <div class="tier-cell"><canvas id="tier-fast"></canvas><div class="tier-label">FAST (sqrt)</div></div>
+        <div class="tier-cell"><canvas id="tier-acc"></canvas><div class="tier-label">ACCURATE (clamp)</div></div>
+        <div class="tier-cell"><canvas id="tier-minde"></canvas><div class="tier-label">GAMUT (MINDE)</div></div>
+      </div>
+      <aside class="panel">
+        <div class="panel-head">Accuracy Tiers</div>
+        <section>
+          <p class="help-line">
+            One vivid OKLCH sweep packed three ways. <strong>FAST</strong> swaps a
+            <code>sqrt</code> for the transfer (~10/255 drift). <strong>ACCURATE</strong> uses the
+            true transfer with a hard clamp. <strong>GAMUT</strong> runs MINDE chroma reduction
+            from the <code>/gamut</code> subpath to hold hue near the boundary.
+          </p>
         </section>
       </aside>
     </section>
@@ -340,394 +289,453 @@
   "imports": {
     "@zakkster/lite-lerp": "https://esm.sh/@zakkster/lite-lerp@1.0.7",
     "@zakkster/lite-color-engine": "../index.js",
-    "@zakkster/lite-color-engine/gamut": "../src/Gamut.js",
-    "@zakkster/lite-color-engine/remap": "../src/Remap.js"
+    "@zakkster/lite-color-engine/gamut": "../src/Gamut.js"
   }
 }
 </script>
 
 <script type="module">
-  import {
-    parseCSSColor, bakeGradientToUint32, sampleColorLUT,
-    packOklchBufferToUint32, lerpOklchBuffer, sRgbToOklchBuffer, deltaEOK,
-  } from "@zakkster/lite-color-engine";
-  import { gamutMapToSrgbBuffer, packOklchBufferToUint32MINDE } from "@zakkster/lite-color-engine/gamut";
-  import { remapPixelsToPalette } from "@zakkster/lite-color-engine/remap";
+    // ============================================================
+    // lite-color-engine v1.3 demo - dogfoods the published entry.
+    // ============================================================
+    import {
+        parseCSSColor,
+        bakeGradientToUint32,
+        sampleColorLUT,
+        lerpOklchBuffer,
+        lerpOklchBufferN,
+        packOklchBufferToUint32,
+        packOklchBufferToUint32Fast,
+        packOklchBufferToUint32IntoN
+    } from '@zakkster/lite-color-engine';
+    import { packOklchBufferToUint32MINDE } from '@zakkster/lite-color-engine/gamut';
 
-  const DPR = Math.min(2, window.devicePixelRatio || 1);
-  const $ = (id) => document.getElementById(id);
-  const clamp01 = (x) => (x < 0 ? 0 : x > 1 ? 1 : x);
-  const hexOf = (u) => "#" + ((u & 255) | 0).toString(16).padStart(2, "0")
-    + (((u >>> 8) & 255) | 0).toString(16).padStart(2, "0")
-    + (((u >>> 16) & 255) | 0).toString(16).padStart(2, "0");
+    // ---- constants ----
+    const TAU = Math.PI * 2;
+    const DPR = Math.min(2, window.devicePixelRatio || 1);
+    const MAX_DT = 1 / 30;
+    const FPS_WINDOW = 0.25;
+    const MAX_COUNT = 100000;
 
-  // easing
-  const EASE = {
-    lin: (t) => t,
-    smooth: (t) => t * t * (3 - 2 * t),
-    io: (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2),
-  };
-
-  // A Canvas2D scene backed by an offscreen ImageData buffer, drawn scaled to fill.
-  function makeSurface(canvas) {
-    const ctx = canvas.getContext("2d");
-    const off = document.createElement("canvas");
-    const offCtx = off.getContext("2d");
-    let cssW = 1, cssH = 1, cache = null, cIW = 0, cIH = 0;
-    function resize() {
-      const r = canvas.getBoundingClientRect();
-      cssW = Math.max(1, Math.round(r.width));
-      cssH = Math.max(1, Math.round(r.height));
-      canvas.width = Math.floor(cssW * DPR);
-      canvas.height = Math.floor(cssH * DPR);
-      ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
-    }
-    return {
-      get w() { return cssW; }, get h() { return cssH; }, ctx, resize,
-      // Cached: only reallocates the ImageData when the internal size changes.
-      ensureBuffer(iw, ih) {
-        if (cache && cIW === iw && cIH === ih) return cache;
-        off.width = iw; off.height = ih; cIW = iw; cIH = ih;
-        const img = offCtx.createImageData(iw, ih);
-        cache = { img, u32: new Uint32Array(img.data.buffer) };
-        return cache;
-      },
-      blit(img, smooth) {
-        offCtx.putImageData(img, 0, 0);
-        ctx.imageSmoothingEnabled = !!smooth;
-        ctx.drawImage(off, 0, 0, cssW, cssH);
-      },
-    };
-  }
-
-  // ════════════════════ SCENE 01 · GRADIENT LAB ════════════════════════════
-  const grad = (() => {
-    const surf = makeSurface($("grad-canvas"));
-    const $preset = $("grad-preset"), $ease = $("grad-ease");
-    const $omax = $("grad-omax"), $smax = $("grad-smax"), $ratio = $("grad-ratio"), $res = $("grad-res");
-    const $sw = $("grad-sw"), $hex = $("grad-hex"), $lch = $("grad-lch"), $mid = $("grad-mid-label");
-
-    const PRESETS = [
-      ["#2f6bff", "#ffd23f"],
-      ["#3b5bff", "#d838ff", "#ff9e2c", "#29e0b0"],
-      ["#22d3ee", "#ef4444"],
-      ["#1e1b4b", "#7c3aed", "#f97316", "#fde047"],
-    ];
-    let W = 1, H = 1, iw = 1, ih = 1, buf = null, oklchRow = null, srgbRow = null;
-    const kf = new Float32Array(8 * 3);
-    const lchLut = new Float32Array(1);
-    let lchArr = new Float32Array(3), running = false, raf = 0, play = 0, dir = 1;
-    let fpsT = performance.now(), fpsN = 0, hudTick = 0;
-    let bandTop = 0, bandH = 0, gap = 0, srgbTop = 0, ribTop = 0, ribH = 0;
-
-    function rebuild() {
-      const css = PRESETS[+$preset.value];
-      const N = css.length;
-      for (let i = 0; i < N; i++) parseCSSColor(css[i], kf, i * 3);
-      const easeFn = EASE[$ease.value];
-
-      // layout inside the offscreen buffer
-      bandH = Math.floor(ih * 0.30); gap = Math.max(6, Math.floor(ih * 0.03));
-      bandTop = Math.floor(ih * 0.08);
-      srgbTop = bandTop + bandH + gap;
-      ribTop = srgbTop + bandH + gap + Math.floor(ih * 0.02);
-      ribH = Math.max(20, ih - ribTop - Math.floor(ih * 0.06));
-
-      const lut = bakeGradientToUint32(kf, N, iw, easeFn);
-      // per-x LCH (for delta + readout) and naive sRGB row
-      oklchRow = new Uint32Array(iw);
-      srgbRow = new Uint32Array(iw);
-      const lch = new Float32Array(iw * 3);
-      const stopRGBA = new Uint32Array(N);
-      for (let i = 0; i < N; i++) stopRGBA[i] = packOklchBufferToUint32(kf, i * 3);
-      for (let x = 0; x < iw; x++) {
-        const te = easeFn(x / (iw - 1)) * (N - 1);
-        const s = Math.min(N - 2, te | 0), f = te - s;
-        lerpOklchBuffer(kf, s * 3, kf, (s + 1) * 3, f, lch, x * 3);
-        oklchRow[x] = sampleColorLUT(lut, x / (iw - 1));
-        const a = stopRGBA[s], b = stopRGBA[s + 1];
-        const r = ((a & 255) + (((b & 255) - (a & 255)) * f)) | 0;
-        const g = (((a >>> 8) & 255) + ((((b >>> 8) & 255) - ((a >>> 8) & 255)) * f)) | 0;
-        const bl = (((a >>> 16) & 255) + ((((b >>> 16) & 255) - ((a >>> 16) & 255)) * f)) | 0;
-        srgbRow[x] = (0xff << 24) | (bl << 16) | (g << 8) | r;
-      }
-      lchArr = lch;
-
-      // delta ribbons
-      const oStep = new Float32Array(iw), sStep = new Float32Array(iw);
-      const sA = new Float32Array(3), sB = new Float32Array(3);
-      let oMax = 1e-6, sMax = 1e-6;
-      for (let x = 1; x < iw; x++) {
-        oStep[x] = deltaEOK(lch, x * 3, lch, (x - 1) * 3);
-        const a = srgbRow[x], b = srgbRow[x - 1];
-        sRgbToOklchBuffer(a & 255, (a >>> 8) & 255, (a >>> 16) & 255, sA, 0);
-        sRgbToOklchBuffer(b & 255, (b >>> 8) & 255, (b >>> 16) & 255, sB, 0);
-        sStep[x] = deltaEOK(sA, 0, sB, 0);
-        if (oStep[x] > oMax) oMax = oStep[x];
-        if (sStep[x] > sMax) sMax = sStep[x];
-      }
-
-      // paint offscreen buffer
-      const { img, u32 } = surf.ensureBuffer(iw, ih);
-      const BG = 0xff0d0907;
-      u32.fill(BG);
-      for (let x = 0; x < iw; x++) {
-        for (let y = bandTop; y < bandTop + bandH; y++) u32[y * iw + x] = oklchRow[x];
-        for (let y = srgbTop; y < srgbTop + bandH; y++) u32[y * iw + x] = srgbRow[x];
-        const scaleV = Math.max(oMax, sMax);
-        const hs = Math.min(ribH, (sStep[x] / scaleV) * ribH) | 0;
-        for (let y = 0; y < hs; y++) u32[(ribTop + ribH - 1 - y) * iw + x] = 0xff2bbbf0; // sRGB cyan
-        const ho = Math.min(ribH, (oStep[x] / scaleV) * ribH) | 0;
-        const yo = ribTop + ribH - 1 - ho;
-        u32[yo * iw + x] = 0xff76e35f; if (yo + 1 < ih) u32[(yo + 1) * iw + x] = 0xff76e35f; // OKLCH green
-      }
-      buf = img;
-
-      $omax.textContent = oMax.toFixed(4);
-      $smax.textContent = sMax.toFixed(4);
-      $ratio.textContent = (sMax / oMax).toFixed(1) + "×";
-      $res.textContent = iw;
-
-      // position the middle overlay label at the sRGB band
-      $mid.style.top = (100 * srgbTop / ih).toFixed(1) + "%";
-      $mid.style.left = "18px";
-    }
-
-    function draw() {
-      surf.blit(buf, true);
-      const ctx = surf.ctx, x = play * (W - 1);
-      // playhead
-      ctx.strokeStyle = "rgba(255,255,255,0.85)";
-      ctx.lineWidth = 1;
-      ctx.beginPath(); ctx.moveTo(x + 0.5, H * (bandTop / ih)); ctx.lineTo(x + 0.5, H * ((srgbTop + bandH) / ih)); ctx.stroke();
-      // readout follows OKLCH gradient at playhead
-      const ix = Math.min(iw - 1, Math.max(0, (play * (iw - 1)) | 0));
-      const u = oklchRow[ix];
-      $sw.style.setProperty("--sw", hexOf(u));
-      $hex.textContent = hexOf(u).toUpperCase();
-      const b = ix * 3;
-      $lch.textContent = "L " + lchArr[b].toFixed(2) + "  C " + lchArr[b + 1].toFixed(2) + "  H " + Math.round(lchArr[b + 2]);
-    }
-
-    function frame() {
-      if (!running) return;
-      play += dir * 0.0032;
-      if (play >= 1) { play = 1; dir = -1; } else if (play <= 0) { play = 0; dir = 1; }
-      draw();
-      fpsN++; const now = performance.now();
-      if (now - fpsT >= 500) { fpsT = now; fpsN = 0; }
-      hudTick++;
-      raf = requestAnimationFrame(frame);
-    }
-
+    // ---- teardown ----
     const ac = new AbortController();
-    $preset.addEventListener("change", rebuild, { signal: ac.signal });
-    $ease.addEventListener("change", rebuild, { signal: ac.signal });
+    const sig = ac.signal;
+    const $ = (id) => document.getElementById(id);
 
-    function resize() { surf.resize(); W = surf.w; H = surf.h; iw = Math.min(1400, Math.max(2, Math.floor(W))); ih = Math.max(2, Math.floor(H)); rebuild(); }
-    return {
-      resize,
-      start() { if (running) return; running = true; raf = requestAnimationFrame(frame); },
-      stop() { running = false; if (raf) cancelAnimationFrame(raf); },
-    };
-  })();
-
-  // ════════════════════ SCENE 02 · GAMUT WHEEL ═════════════════════════════
-  const gamut = (() => {
-    const surf = makeSurface($("gamut-canvas"));
-    const $l = $("gamut-l"), $lV = $("gamut-l-v"), $c = $("gamut-c"), $cV = $("gamut-c-v");
-    const $oog = $("gamut-oog"), $fps = $("gamut-fps"), $spin = $("gamut-spin");
-
-    let W = 1, H = 1, iw = 1, ih = 1, buf = null, u32 = null;
-    let L = 0.72, Cmax = 0.37, spin = true, lDir = 1, dirty = true;
-    let running = false, raf = 0, fpsT = performance.now(), fpsN = 0, hudTick = 0, oog = 0;
-    let recomputeAcc = 0;
-    const c1 = new Float32Array(3), c2 = new Float32Array(3);
-    let cx = 0, cy = 0, R = 1;
-    const boundary = new Float32Array(360 * 2); // px points
-
-    function rebuildWheel() {
-      const b = surf.ensureBuffer(iw, ih); buf = b.img; u32 = b.u32; u32.fill(0xff0d0907);
-      cx = iw / 2; cy = ih / 2; R = Math.min(iw, ih) * 0.46;
-      let out = 0, total = 0;
-      for (let y = 0; y < ih; y++) {
-        const dy = y - cy;
-        for (let x = 0; x < iw; x++) {
-          const dx = x - cx, r = Math.sqrt(dx * dx + dy * dy);
-          if (r > R) continue;
-          const Hh = (Math.atan2(dy, dx) * 57.29577951308232 + 360) % 360;
-          const C = (r / R) * Cmax;
-          c1[0] = L; c1[1] = C; c1[2] = Hh;
-          total++;
-          let u;
-          if (dx < 0) { u = packOklchBufferToUint32(c1, 0); }
-          else {
-            gamutMapToSrgbBuffer(c1, 0, c2, 0);
-            if (c2[1] < C - 1e-4) out++;
-            u = packOklchBufferToUint32MINDE(c1, 0);
-          }
-          u32[y * iw + x] = u;
+    // Size a canvas to its box in device pixels; rebuild ImageData only on change.
+    const surfaceOf = (canvas) => ({ canvas, ctx: null, img: null, u32: null, w: 0, h: 0 });
+    const sizeSurface = (s) => {
+        const rect = s.canvas.getBoundingClientRect();
+        const w = Math.max(0, Math.round(rect.width * DPR));
+        const h = Math.max(0, Math.round(rect.height * DPR));
+        if (w === 0 || h === 0) { s.w = 0; s.h = 0; return false; }
+        if (!s.ctx) s.ctx = s.canvas.getContext('2d', { alpha: false });
+        if (w !== s.w || h !== s.h) {
+            s.canvas.width = w; s.canvas.height = h;
+            s.img = s.ctx.createImageData(w, h);
+            s.u32 = new Uint32Array(s.img.data.buffer);
+            s.w = w; s.h = h;
         }
-      }
-      // boundary ring (bisection per degree)
-      for (let a = 0; a < 360; a++) {
-        const ang = a * 0.017453292519943295, Hh = a;
-        let lo = 0, hi = Cmax;
-        for (let it = 0; it < 20; it++) { const m = (lo + hi) / 2; c1[0] = L; c1[1] = m; c1[2] = Hh; gamutMapToSrgbBuffer(c1, 0, c2, 0); if (c2[1] < m - 1e-4) hi = m; else lo = m; }
-        const rr = (lo / Cmax) * R;
-        boundary[a * 2] = cx + Math.cos(ang) * rr;
-        boundary[a * 2 + 1] = cy + Math.sin(ang) * rr;
-      }
-      oog = total ? out / (total / 2) : 0;
-      dirty = false;
-    }
-
-    function draw() {
-      surf.blit(buf, true);
-      const ctx = surf.ctx, sx = W / iw, sy = H / ih;
-      // gamut boundary ring
-      ctx.strokeStyle = "rgba(255,255,255,0.9)"; ctx.lineWidth = 1.25; ctx.beginPath();
-      for (let a = 0; a <= 360; a++) { const i = (a % 360) * 2; const px = boundary[i] * sx, py = boundary[i + 1] * sy; if (a === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py); }
-      ctx.stroke();
-      // center split line
-      ctx.strokeStyle = "rgba(255,255,255,0.12)"; ctx.beginPath(); ctx.moveTo((cx * sx) + 0.5, cy * sy - R * sy); ctx.lineTo((cx * sx) + 0.5, cy * sy + R * sy); ctx.stroke();
-    }
-
-    function frame() {
-      if (!running) return;
-      if (spin) {
-        recomputeAcc += 1;
-        if (recomputeAcc >= 4) {   // ~15 Hz recompute while sweeping
-          recomputeAcc = 0;
-          L += lDir * 0.012;
-          if (L >= 0.95) { L = 0.95; lDir = -1; } else if (L <= 0.18) { L = 0.18; lDir = 1; }
-          $l.value = L.toFixed(2); $lV.textContent = L.toFixed(2);
-          dirty = true;
+        return true;
+    };
+    // Replicate row 0 down a full ImageData via exponential doubling.
+    const fillRowsDown = (u32, w, h) => {
+        let filled = 1;
+        while (filled < h) {
+            const n = filled < h - filled ? filled : h - filled;
+            u32.copyWithin(filled * w, 0, n * w);
+            filled += n;
         }
-      }
-      if (dirty) rebuildWheel();
-      draw();
-      fpsN++; const now = performance.now();
-      if (now - fpsT >= 500) { $fps.textContent = Math.round(fpsN * 1000 / (now - fpsT)); fpsT = now; fpsN = 0; }
-      if ((hudTick++ & 7) === 0) $oog.textContent = Math.round(oog * 100) + "%";
-      raf = requestAnimationFrame(frame);
-    }
-
-    const ac = new AbortController();
-    $l.addEventListener("input", () => { L = +$l.value; $lV.textContent = L.toFixed(2); dirty = true; }, { signal: ac.signal });
-    $c.addEventListener("input", () => { Cmax = +$c.value; $cV.textContent = Cmax.toFixed(2); dirty = true; }, { signal: ac.signal });
-    $spin.addEventListener("click", () => { spin = !spin; $spin.setAttribute("aria-pressed", spin ? "true" : "false"); }, { signal: ac.signal });
-
-    function resize() { surf.resize(); W = surf.w; H = surf.h; iw = Math.min(520, Math.max(2, Math.floor(W))); ih = Math.min(520, Math.max(2, Math.floor(H))); dirty = true; }
-    return {
-      resize,
-      start() { if (running) return; running = true; fpsT = performance.now(); fpsN = 0; raf = requestAnimationFrame(frame); },
-      stop() { running = false; if (raf) cancelAnimationFrame(raf); },
     };
-  })();
 
-  // ════════════════════ SCENE 03 · PALETTE REMAP ═══════════════════════════
-  const remap = (() => {
-    const surf = makeSurface($("remap-canvas"));
-    const $preserve = $("remap-preserve"), $preset = $("remap-preset"), $chips = $("remap-chips");
-    const $px = $("remap-px"), $pal = $("remap-pal"), $mode = $("remap-mode"), $fps = $("remap-fps");
-    const $modeLabel = $("remap-mode-label");
-
-    const PALETTES = [
-      ["#0d1117", "#2b7a52", "#5fe39f", "#7dd3fc", "#e879a8"],
-      ["#0d0907", "#7c2d12", "#f59e0b", "#fca5a5", "#fde68a"],
-      ["#0b1220", "#1e3a8a", "#38bdf8", "#a5f3fc", "#e0f2fe"],
-      ["#08130d", "#166534", "#4ade80", "#a7f3d0", "#ecfccb"],
-    ];
-    let W = 1, H = 1, gw = 1, gh = 1, buf = null, u32 = null, src = null, out = null;
-    let palLch = new Float32Array(15), P = 5, preserve = true;
-    let running = false, raf = 0, fpsT = performance.now(), fpsN = 0, hudTick = 0, t0 = performance.now();
-    const balls = [[0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0]];
-
-    function loadPalette() {
-      const css = PALETTES[+$preset.value]; P = css.length;
-      palLch = new Float32Array(P * 3);
-      for (let i = 0; i < P; i++) parseCSSColor(css[i], palLch, i * 3);
-      $chips.replaceChildren();
-      for (const c of css) { const d = document.createElement("div"); d.className = "chip"; d.style.setProperty("--c", c); $chips.appendChild(d); }
-      $pal.textContent = P;
-    }
-
-    function alloc() {
-      const half = Math.floor(W / 2) - 10;
-      gw = Math.min(460, Math.max(2, half)); gh = Math.max(2, Math.floor(H));
-      const b = surf.ensureBuffer(gw * 2 + 20, gh); buf = b.img; u32 = b.u32; u32.fill(0xff0d0907);
-      src = new Uint8ClampedArray(gw * gh * 4);
-      out = new Uint32Array(gw * gh);
-    }
-
-    function frame() {
-      if (!running) return;
-      const now = performance.now(), t = (now - t0) * 0.0009;
-      // moving metaballs (shaded single-hue source)
-      balls[0][0] = gw * (0.30 + 0.16 * Math.sin(t)); balls[0][1] = gh * (0.40 + 0.22 * Math.cos(t * 0.9)); balls[0][2] = gh * 0.34;
-      balls[1][0] = gw * (0.68 + 0.14 * Math.cos(t * 1.1)); balls[1][1] = gh * (0.55 + 0.20 * Math.sin(t * 1.3)); balls[1][2] = gh * 0.40;
-      balls[2][0] = gw * (0.52 + 0.20 * Math.sin(t * 0.7 + 1)); balls[2][1] = gh * (0.30 + 0.16 * Math.cos(t * 0.6)); balls[2][2] = gh * 0.30;
-      balls[3][0] = gw * (0.40 + 0.18 * Math.cos(t * 1.4)); balls[3][1] = gh * (0.72 + 0.14 * Math.sin(t)); balls[3][2] = gh * 0.28;
-
-      for (let y = 0; y < gh; y++) for (let x = 0; x < gw; x++) {
-        let f = 0;
-        for (let k = 0; k < 4; k++) { const dx = x - balls[k][0], dy = y - balls[k][1], br = balls[k][2]; f += (br * br) / (dx * dx + dy * dy + 1); }
-        const v = f < 1 ? f : 1;
-        const p = (y * gw + x) * 4;
-        src[p] = (18 + v * 120) | 0; src[p + 1] = (58 + v * 180) | 0; src[p + 2] = (72 + v * 150) | 0; src[p + 3] = 255;
-      }
-      remapPixelsToPalette(src, palLch, out, gw * gh, P, { preserveLightness: preserve });
-
-      // compose source (left) | remapped (right)
-      const stride = gw * 2 + 20;
-      for (let y = 0; y < gh; y++) for (let x = 0; x < gw; x++) {
-        const sp = (y * gw + x) * 4;
-        u32[y * stride + x] = (0xff << 24) | (src[sp + 2] << 16) | (src[sp + 1] << 8) | src[sp];
-        u32[y * stride + gw + 20 + x] = out[y * gw + x];
-      }
-      surf.blit(buf, false);
-
-      fpsN++;
-      if (now - fpsT >= 500) { $fps.textContent = Math.round(fpsN * 1000 / (now - fpsT)); fpsT = now; fpsN = 0; }
-      if ((hudTick++ & 7) === 0) { $px.textContent = (gw * gh / 1000 | 0) + "K"; }
-      raf = requestAnimationFrame(frame);
-    }
-
-    const ac = new AbortController();
-    $preset.addEventListener("change", loadPalette, { signal: ac.signal });
-    $preserve.addEventListener("click", () => {
-      preserve = !preserve;
-      $preserve.setAttribute("aria-pressed", preserve ? "true" : "false");
-      $mode.textContent = preserve ? "preserve" : "flat";
-      $modeLabel.textContent = preserve ? "remapped · shading preserved" : "remapped · flat fill";
-    }, { signal: ac.signal });
-
-    function resize() { surf.resize(); W = surf.w; H = surf.h; alloc(); }
-    loadPalette();
-    return {
-      resize,
-      start() { if (running) return; running = true; t0 = performance.now(); fpsT = t0; fpsN = 0; raf = requestAnimationFrame(frame); },
-      stop() { running = false; if (raf) cancelAnimationFrame(raf); },
+    // ---- gradient presets (authored as CSS OKLCH, parsed once) ----
+    // Each preset is a list of oklch() stops; last stop fades to black for a tail.
+    const PRESETS = {
+        AURORA: ['oklch(0.20 0.08 240)', 'oklch(0.55 0.18 200)', 'oklch(0.80 0.22 160)', 'oklch(0.92 0.18 120)', 'oklch(0.65 0.20 299)', 'oklch(0 0 299)'],
+        SUNSET: ['oklch(0.30 0.16 290)', 'oklch(0.50 0.22 25)', 'oklch(0.78 0.20 60)', 'oklch(0.92 0.13 90)', 'oklch(0.60 0.20 35)', 'oklch(0 0 35)'],
+        NEON:   ['oklch(0.40 0.20 330)', 'oklch(0.72 0.30 330)', 'oklch(0.85 0.28 280)', 'oklch(0.85 0.26 200)', 'oklch(0.70 0.30 160)', 'oklch(0 0 160)'],
+        PLASMA: ['oklch(0.10 0.05 280)', 'oklch(0.55 0.24 330)', 'oklch(0.78 0.20 30)', 'oklch(0.95 0.13 90)', 'oklch(0.50 0.18 300)', 'oklch(0 0 90)']
     };
-  })();
+    const PRESET_KEYS = ['AURORA', 'SUNSET', 'NEON', 'PLASMA'];
+    const LUT_RES = 512;
+    // Pre-parse every preset's keyframe buffer once (authoring-time allocation).
+    const PRESET_KF = {};
+    for (const key of PRESET_KEYS) {
+        const stops = PRESETS[key];
+        const kf = new Float32Array(stops.length * 3);
+        for (let i = 0; i < stops.length; i++) parseCSSColor(stops[i], kf, i * 3);
+        PRESET_KF[key] = { kf, n: stops.length };
+    }
+    const bakePreset = (key) => {
+        const p = PRESET_KF[key];
+        return bakeGradientToUint32(p.kf, p.n, LUT_RES);
+    };
 
-  // ─── tabs ────────────────────────────────────────────────────────────────
-  const scenes = { grad, gamut, remap };
-  let current = "grad";
-  function activate(tab) {
-    if (tab === current) return;
-    scenes[current].stop();
-    current = tab;
-    for (const b of $("tabs").querySelectorAll("button")) b.setAttribute("aria-current", b.dataset.tab === tab ? "true" : "false");
-    for (const s of document.querySelectorAll(".scene")) { if (s.dataset.scene === tab) s.setAttribute("data-active", ""); else s.removeAttribute("data-active"); }
-    requestAnimationFrame(() => { scenes[tab].resize(); scenes[tab].start(); });
-  }
-  $("tabs").addEventListener("click", (e) => { const t = e.target.closest("button[data-tab]"); if (t) activate(t.dataset.tab); });
-  window.addEventListener("resize", () => scenes[current].resize());
-  window.addEventListener("pagehide", () => { grad.stop(); gamut.stop(); remap.stop(); });
+    // ============================================================
+    // SCENE 01 - PARTICLE FIELD (100k hero)
+    // ============================================================
+    const fieldSurf = surfaceOf($('field-canvas'));
+    const $fOverlay = $('field-overlay');
+    const $fGrad = $('field-grad');
+    const $fRecolor = $('field-recolor');
+    const $fSwirl = $('field-swirl');
+    const $fSwirlV = $('field-swirl-v');
+    const $fCount = $('field-count');
+    const $fPlay = $('field-play');
+    const $fFps = $('field-fps');
+    const $fMs = $('field-ms');
+    const $fN = $('field-n');
+    const $fRec = $('field-rec');
+    const $fLut = $('field-lut');
+    const fLutCtx = $fLut.getContext('2d');
+    const fLutImg = fLutCtx.createImageData(LUT_RES, 1);
+    const fLutU32 = new Uint32Array(fLutImg.data.buffer);
 
-  requestAnimationFrame(() => { grad.resize(); grad.start(); });
+    // SoA particle buffers (allocated once, at MAX_COUNT).
+    const pX = new Float32Array(MAX_COUNT);
+    const pY = new Float32Array(MAX_COUNT);
+    const pVx = new Float32Array(MAX_COUNT);
+    const pVy = new Float32Array(MAX_COUNT);
+    const pLife = new Float32Array(MAX_COUNT);
+    const pMax = new Float32Array(MAX_COUNT);
+
+    let fCount = MAX_COUNT;
+    let fGradIdx = 0;
+    let fLut = bakePreset(PRESET_KEYS[0]);
+    let fSwirl = 0.06;
+    let fPlaying = true;
+    let fStarted = false;
+    let fCx = 0, fCy = 0;
+    let fMouseX = -1e9, fMouseY = -1e9;
+    let fRecAccum = 0, fMsAccum = 0, fFrames = 0, fFpsAccum = 0;
+
+    // physics constants (scaled by DPR at spawn time via helpers)
+    const F_GRAVITY = 0.04 * DPR;
+    const F_DAMP = 0.995;
+    const F_SPAWN_R = 30 * DPR;
+    const F_SPEED_MIN = DPR;
+    const F_SPEED_MAX = 4 * DPR;
+
+    const paintLutStrip = () => {
+        for (let i = 0; i < LUT_RES; i++) fLutU32[i] = fLut[i];
+        fLutCtx.putImageData(fLutImg, 0, 0);
+    };
+
+    const fSpawn = (i) => {
+        const a = Math.random() * TAU;
+        const ca = Math.cos(a), sa = Math.sin(a);
+        const r = Math.random() * F_SPAWN_R;
+        pX[i] = fCx + ca * r;
+        pY[i] = fCy + sa * r;
+        const sp = Math.random() * F_SPEED_MAX + F_SPEED_MIN;
+        pVx[i] = ca * sp;
+        pVy[i] = sa * sp;
+        pLife[i] = 0;
+        pMax[i] = (Math.random() * 180 + 60) | 0;
+    };
+
+    const fResize = () => {
+        if (!sizeSurface(fieldSurf)) return;
+        fCx = fieldSurf.w * 0.5;
+        fCy = fieldSurf.h * 0.5;
+    };
+
+    const fReseed = () => { for (let i = 0; i < MAX_COUNT; i++) fSpawn(i); };
+
+    const fRender = (dt) => {
+        if (fieldSurf.w === 0) return;
+        const w = fieldSurf.w, h = fieldSurf.h, u32 = fieldSurf.u32, lut = fLut;
+        const n = fCount;
+        const mx = fMouseX, my = fMouseY, hasM = mx > -1e8;
+        const swirl = fSwirl;
+        const maxIdx = LUT_RES - 1;
+        let recycled = 0;
+
+        u32.fill(0xFF000000);
+
+        for (let i = 0; i < n; i++) {
+            // pointer attractor (inverse-square, capped)
+            if (hasM) {
+                const dx = mx - pX[i], dy = my - pY[i];
+                const d2 = dx * dx + dy * dy + 1;
+                let f = 800 / d2;
+                if (f > 0.5) f = 0.5;
+                const k = f * 0.02;
+                pVx[i] += dx * k;
+                pVy[i] += dy * k;
+            }
+            // swirl around the emitter center -> flowing arcs (no trig)
+            const rx = pX[i] - fCx, ry = pY[i] - fCy;
+            pVx[i] += -ry * swirl * 0.0016;
+            pVy[i] += rx * swirl * 0.0016;
+
+            pVy[i] += F_GRAVITY;
+            pVx[i] *= F_DAMP;
+            pVy[i] *= F_DAMP;
+            pX[i] += pVx[i];
+            pY[i] += pVy[i];
+            pLife[i]++;
+
+            if (pLife[i] >= pMax[i] || pX[i] < 0 || pX[i] >= w || pY[i] < 0 || pY[i] >= h) {
+                fSpawn(i);
+                recycled++;
+            }
+
+            const t = pLife[i] / pMax[i];
+            const color = lut[(t * maxIdx) | 0];
+
+            const idx = (pY[i] | 0) * w + (pX[i] | 0);
+            // additive, saturating plot (glow)
+            const cur = u32[idx];
+            let nr = (cur & 255) + (color & 255);
+            let ng = ((cur >>> 8) & 255) + ((color >>> 8) & 255);
+            let nb = ((cur >>> 16) & 255) + ((color >>> 16) & 255);
+            if (nr > 255) nr = 255;
+            if (ng > 255) ng = 255;
+            if (nb > 255) nb = 255;
+            u32[idx] = (0xFF000000 | (nb << 16) | (ng << 8) | nr) >>> 0;
+        }
+
+        fieldSurf.ctx.putImageData(fieldSurf.img, 0, 0);
+
+        // throttled telemetry (~4 Hz)
+        fRecAccum += recycled;
+        fMsAccum += dt;
+        fFrames++;
+        fFpsAccum += dt;
+        if (fFpsAccum >= FPS_WINDOW) {
+            $fFps.textContent = Math.round(fFrames / fFpsAccum);
+            $fMs.textContent = (fMsAccum / fFrames * 1000).toFixed(1) + ' ms';
+            $fN.textContent = (n / 1000) + 'k';
+            $fRec.textContent = Math.round(fRecAccum / fFpsAccum).toLocaleString();
+            fFrames = 0; fFpsAccum = 0; fMsAccum = 0; fRecAccum = 0;
+        }
+    };
+
+    const fSetGradient = (idx) => {
+        fGradIdx = idx & 3;
+        const key = PRESET_KEYS[fGradIdx];
+        fLut = bakePreset(key);
+        $fGrad.textContent = key;
+        paintLutStrip();
+    };
+
+    // Recolor demo: rebuild the LUT from the preset's OKLCH keyframes with the
+    // v1.3 batch packer (into a Uint32Array in one call), proving the path.
+    const fRecolorBatch = () => {
+        const key = PRESET_KEYS[fGradIdx];
+        const p = PRESET_KF[key];
+        // build a resolution-length OKLCH buffer by sampling the keyframes, then batch-pack
+        const oklch = new Float32Array(LUT_RES * 3);
+        const last = p.n - 1;
+        for (let i = 0; i < LUT_RES; i++) {
+            const st = (i / (LUT_RES - 1)) * last;
+            let seg = st | 0; if (seg >= last) seg = last - 1;
+            lerpOklchBuffer(p.kf, seg * 3, p.kf, seg * 3 + 3, st - seg, oklch, i * 3);
+        }
+        packOklchBufferToUint32IntoN(oklch, 0, fLut, 0, LUT_RES, 1, true);
+        paintLutStrip();
+    };
+
+    const fStart = () => {
+        if (fStarted) return;
+        fStarted = true;
+        $fOverlay.classList.add('gone');
+    };
+
+    // ============================================================
+    // SCENE 02 - BATCH KERNELS
+    // ============================================================
+    const batchSurf = surfaceOf($('batch-canvas'));
+    const $bLut = $('batch-lut');
+    const $bSpeed = $('batch-speed');
+    const $bSpeedV = $('batch-speed-v');
+    const $bFps = $('batch-fps');
+    const $bPack = $('batch-pack');
+    const $bCols = $('batch-cols');
+    const $bMode = $('batch-mode');
+
+    let bCool = new Float32Array(0);   // full-width OKLCH gradient (cool)
+    let bWarm = new Float32Array(0);   // full-width OKLCH gradient (warm)
+    let bCur = new Float32Array(0);    // morphed row
+    let bRow = new Uint32Array(0);     // packed row
+    let bW = 0;
+    let bTime = 0;
+    let bSpeed = 1.0;
+    let bUseLut = false;
+    let bPackMs = 0, bFrames = 0, bFpsAccum = 0;
+
+    const _c0 = new Float32Array(3), _c1 = new Float32Array(3);
+    const _w0 = new Float32Array(3), _w1 = new Float32Array(3);
+    parseCSSColor('oklch(0.72 0.16 210)', _c0, 0);   // cool A
+    parseCSSColor('oklch(0.55 0.20 280)', _c1, 0);   // cool B
+    parseCSSColor('oklch(0.70 0.20 40)', _w0, 0);    // warm A
+    parseCSSColor('oklch(0.62 0.24 10)', _w1, 0);    // warm B
+
+    const bBuildGradients = (w) => {
+        bCool = new Float32Array(w * 3);
+        bWarm = new Float32Array(w * 3);
+        bCur = new Float32Array(w * 3);
+        bRow = new Uint32Array(w);
+        for (let x = 0; x < w; x++) {
+            const t = x / (w - 1);
+            lerpOklchBuffer(_c0, 0, _c1, 0, t, bCool, x * 3);
+            lerpOklchBuffer(_w0, 0, _w1, 0, t, bWarm, x * 3);
+        }
+    };
+
+    const bResize = () => {
+        if (!sizeSurface(batchSurf)) return;
+        if (batchSurf.w !== bW) { bW = batchSurf.w; bBuildGradients(bW); }
+    };
+
+    const bRender = (dt) => {
+        if (batchSurf.w === 0 || bW === 0) return;
+        const w = bW, h = batchSurf.h;
+        bTime += dt * bSpeed;
+        const phase = 0.5 - 0.5 * Math.cos(bTime); // smooth 0..1..0
+
+        // v1.3: morph the whole gradient with ONE shared-t call
+        lerpOklchBufferN(bCool, 0, bWarm, 0, phase, bCur, 0, w);
+
+        // v1.3: pack the whole row in one call (toggle LUT)
+        const t0 = performance.now();
+        packOklchBufferToUint32IntoN(bCur, 0, bRow, 0, w, 1, bUseLut);
+        bPackMs = performance.now() - t0;
+
+        // blit row 0, replicate down
+        batchSurf.u32.set(bRow, 0);
+        fillRowsDown(batchSurf.u32, w, h);
+        batchSurf.ctx.putImageData(batchSurf.img, 0, 0);
+
+        bFrames++;
+        bFpsAccum += dt;
+        if (bFpsAccum >= FPS_WINDOW) {
+            $bFps.textContent = Math.round(bFrames / bFpsAccum);
+            $bPack.textContent = bPackMs.toFixed(2) + ' ms';
+            $bCols.textContent = w;
+            bFrames = 0; bFpsAccum = 0;
+        }
+    };
+
+    // ============================================================
+    // SCENE 03 - ACCURACY TIERS
+    // ============================================================
+    const tierFast = surfaceOf($('tier-fast'));
+    const tierAcc = surfaceOf($('tier-acc'));
+    const tierMinde = surfaceOf($('tier-minde'));
+    const _ta = new Float32Array(3), _tb = new Float32Array(3), _tt = new Float32Array(3);
+    parseCSSColor('oklch(0.62 0.27 25)', _ta, 0);
+    parseCSSColor('oklch(0.66 0.26 265)', _tb, 0);
+
+    const renderTier = (s, packFn) => {
+        if (!sizeSurface(s)) return;
+        const w = s.w, h = s.h, u32 = s.u32;
+        for (let x = 0; x < w; x++) {
+            lerpOklchBuffer(_ta, 0, _tb, 0, x / w, _tt, 0);
+            u32[x] = packFn(_tt, 0);
+        }
+        fillRowsDown(u32, w, h);
+        s.ctx.putImageData(s.img, 0, 0);
+    };
+    const tiersRender = () => {
+        renderTier(tierFast, packOklchBufferToUint32Fast);
+        renderTier(tierAcc, packOklchBufferToUint32);
+        renderTier(tierMinde, packOklchBufferToUint32MINDE);
+    };
+
+    // ============================================================
+    // SHELL: scene registry, master loop, tabs, resize, dispose
+    // ============================================================
+    const scenes = {
+        field: { enter: () => { fResize(); fReseed(); paintLutStrip(); }, resize: fResize, frame: (dt) => { if (fStarted && fPlaying) fRender(dt); } },
+        batch: { enter: bResize, resize: bResize, frame: bRender },
+        tiers: { enter: tiersRender, resize: tiersRender, frame: null }
+    };
+    let active = 'field';
+    let rafId = 0, lastNow = 0;
+
+    const frame = (now) => {
+        const dt = lastNow ? Math.min((now - lastNow) / 1000, MAX_DT) : 0;
+        lastNow = now;
+        const sc = scenes[active];
+        if (sc.frame) sc.frame(dt);
+        rafId = requestAnimationFrame(frame);
+    };
+
+    const $scenes = document.querySelectorAll('.scene');
+    const $tabs = $('tabs');
+    const switchScene = (name) => {
+        if (!scenes[name]) return;
+        active = name;
+        for (const s of $scenes) {
+            if (s.dataset.scene === name) s.setAttribute('data-active', '');
+            else s.removeAttribute('data-active');
+        }
+        for (const btn of $tabs.children) btn.setAttribute('aria-current', btn.dataset.tab === name ? 'true' : 'false');
+        scenes[name].enter();
+    };
+
+    const ro = new ResizeObserver(() => { scenes[active].resize(); });
+    ro.observe($('field-canvas'));
+    ro.observe($('batch-canvas'));
+    ro.observe($('tier-fast'));
+    ro.observe($('tier-acc'));
+    ro.observe($('tier-minde'));
+
+    // ---- events (all abortable) ----
+    $tabs.addEventListener('click', (e) => {
+        const btn = e.target.closest('button[data-tab]');
+        if (btn) switchScene(btn.dataset.tab);
+    }, { signal: sig });
+
+    // field pointer attractor
+    const onPointer = (e) => { fMouseX = e.clientX * DPR; fMouseY = e.clientY * DPR; };
+    const offPointer = () => { fMouseX = -1e9; fMouseY = -1e9; };
+    const stage = $('field-canvas');
+    stage.addEventListener('pointerdown', onPointer, { signal: sig });
+    stage.addEventListener('pointermove', onPointer, { signal: sig });
+    window.addEventListener('pointerup', offPointer, { signal: sig });
+    window.addEventListener('pointercancel', offPointer, { signal: sig });
+
+    $fOverlay.addEventListener('pointerdown', fStart, { signal: sig });
+    $fGrad.addEventListener('click', () => fSetGradient(fGradIdx + 1), { signal: sig });
+    $fRecolor.addEventListener('click', fRecolorBatch, { signal: sig });
+    $fSwirl.addEventListener('input', () => { fSwirl = +$fSwirl.value; $fSwirlV.textContent = fSwirl.toFixed(2); }, { signal: sig });
+    $fCount.addEventListener('click', () => {
+        fCount = fCount === MAX_COUNT ? MAX_COUNT / 2 : MAX_COUNT;
+        $fCount.textContent = (fCount / 1000) + 'k';
+    }, { signal: sig });
+    $fPlay.addEventListener('click', () => {
+        fPlaying = !fPlaying;
+        $fPlay.textContent = fPlaying ? 'Pause' : 'Play';
+    }, { signal: sig });
+    window.addEventListener('keydown', (e) => {
+        const k = { '1': 0, '2': 1, '3': 2, '4': 3 }[e.key];
+        if (k !== undefined) fSetGradient(k);
+    }, { signal: sig });
+
+    // batch controls
+    $bLut.addEventListener('click', () => {
+        bUseLut = !bUseLut;
+        $bLut.setAttribute('aria-pressed', String(bUseLut));
+        $bLut.textContent = bUseLut ? 'useLut: on' : 'useLut: off';
+        $bMode.textContent = bUseLut ? 'LUT (~1 LSB)' : 'accurate';
+    }, { signal: sig });
+    $bSpeed.addEventListener('input', () => { bSpeed = +$bSpeed.value; $bSpeedV.textContent = bSpeed.toFixed(1) + 'x'; }, { signal: sig });
+
+    // ---- dispose ----
+    const dispose = () => { cancelAnimationFrame(rafId); ro.disconnect(); ac.abort(); };
+    window.addEventListener('pagehide', dispose, { signal: sig });
+
+    // ---- boot ----
+    $fSwirlV.textContent = (+$fSwirl.value).toFixed(2);
+    $bSpeedV.textContent = (+$bSpeed.value).toFixed(1) + 'x';
+    fSwirl = +$fSwirl.value;
+    bSpeed = +$bSpeed.value;
+    fSetGradient(0);
+    scenes.field.enter();
+    rafId = requestAnimationFrame(frame);
 </script>
 </body>
 </html>

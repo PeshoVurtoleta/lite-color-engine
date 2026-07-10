@@ -12,8 +12,10 @@ export { bakeGradientToUint32 } from './src/lut.js';
 
 export {
     lerpOklchBuffer,
+    lerpOklchBufferN,
     packOklchBufferToUint32,
     packOklchBufferToUint32Fast,
+    packOklchBufferToUint32IntoN,
     packOklchBufferToUint32P3,
     packOklchBufferToUint32P3Fast,
     sampleColorLUT

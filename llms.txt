@@ -1,4 +1,4 @@
-# lite-color-engine — LLM Reference (v1.2)
+# lite-color-engine - LLM Reference (v1.3)
 
 ## Core Exports
 
@@ -11,12 +11,18 @@
 - `displayP3ToOklchBuffer(r, g, b, out, off)` — New in v1.2
 - `oklchToLinearP3(L, C, H, out)` — Inverse for P3 packing
 
-### Runtime (Hot Path — Zero GC)
+### Runtime (Hot Path - Zero GC)
 - `lerpOklchBuffer(...)`
-- `packOklchBufferToUint32(buf, off, alpha?)` — Accurate sRGB
-- `packOklchBufferToUint32Fast(...)` — Fast approx
-- `packOklchBufferToUint32P3(buf, off, alpha?)` — Accurate P3 output
-- `packOklchBufferToUint32P3Fast(...)` — Fast P3 output
+- `packOklchBufferToUint32(buf, off, alpha?)` - Accurate sRGB
+- `packOklchBufferToUint32Fast(...)` - Fast approx
+- `packOklchBufferToUint32P3(buf, off, alpha?)` - Accurate P3 output
+- `packOklchBufferToUint32P3Fast(...)` - Fast P3 output
+- `sampleColorLUT(lut, t)` - O(1) lookup into a baked gradient LUT
+
+### Batch kernels (v1.3, for 100k+ particle systems)
+- `lerpOklchBufferN(a, offA, b, offB, t, out, offOut, n)` - bulk lerp n triplets (stride 3), bit-exact to n scalar calls.
+- `packOklchBufferToUint32IntoN(src, offSrc, dst, offDst, n, alpha?, useLut?)` - bulk pack n OKLCH -> Uint32 (dst stride 1). `useLut=true` uses the 4k transfer LUT (~4.4x throughput vs accurate, within 1 LSB; Fast-packer speed at near-exact accuracy).
+- Note: the batch win comes from `useLut`, not from call-amortization (accurate batch ~= scalar loop in V8; pow-bound).
 
 ### Gamut mapping (subpath: `@zakkster/lite-color-engine/gamut`, NOT hot-path)
 - `packOklchBufferToUint32MINDE(buf, off, alpha?)` — MINDE chroma-reduction gamut map. ~30x slower than the core packer; use at LUT-build/authoring time.
