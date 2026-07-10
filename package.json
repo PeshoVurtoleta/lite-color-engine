@@ -1,6 +1,6 @@
 {
   "name": "@zakkster/lite-color-engine",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "author": "Zahary Shinikchiev <shinikchiev@yahoo.com>",
   "description": "Zero-GC, data-oriented OKLCH color engine and WebGL/Canvas buffer pipeline.",
   "type": "module",

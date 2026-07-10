@@ -1,5 +1,27 @@
 # Changelog
 
+## [1.4.0] - 2026-07-10
+
+### Added
+- **CSS formatters (round-trip emit):**
+  - `formatOklchCss(buf, off, alpha?)` - emits `oklch(L% C H)` (or `.../ alpha` when
+    alpha is supplied and < 1). Round-trips through `parseCSSColor`.
+  - `formatHex(buf, off)` - emits `#rrggbb` via the accurate sRGB pack path.
+    Round-trips with `parseHexToBuffer` to within 1 LSB per channel.
+  - Both are authoring-time helpers (they allocate a string) and are not for
+    per-frame hot paths.
+
+### Fixed
+- Named-color table: `darkslateggrey` -> `darkslategrey` and `navajawhite` ->
+  `navajowhite` (previously unreachable typo keys), and `lightsteelblue` now
+  returns its correct value `#b0c4de` instead of powderblue's `#b0e0e6`.
+
+### Notes
+- No breaking changes; all v1.3 exports (batch kernels, 4k LUT, Display P3,
+  `sampleColorLUT`) are retained.
+
+---
+
 ## [1.3.0] - 2026-07-10
 
 ### Added

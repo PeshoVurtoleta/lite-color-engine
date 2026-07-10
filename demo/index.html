@@ -140,6 +140,12 @@
 
     .lutstrip { width: 100%; height: 16px; display: block; border: 1px solid var(--line-strong); image-rendering: pixelated; }
 
+    .colorout { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+    .colorout-sw { width: 30px; height: 30px; border-radius: 3px; border: 1px solid var(--line-strong); background: var(--sw, #000); flex: none; }
+    .colorout-txt { min-width: 0; }
+    .colorout-oklch { color: var(--green); font-size: 11px; font-weight: 700; letter-spacing: 0.02em; }
+    .colorout-hex { color: var(--text-dim); font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; }
+
     .overlay {
       position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
       background: rgba(7, 9, 13, 0.72); cursor: pointer; z-index: 3; transition: opacity .35s;
@@ -164,7 +170,7 @@
     <div class="brand">
       <span class="mark">&#9680;</span>
       <span class="pkg">@zakkster/lite-color-engine</span>
-      <span class="ver">v1.3.0</span>
+      <span class="ver">v1.4.0</span>
     </div>
     <div class="tagline"><span class="dot"></span>oscilloscope &middot; zero-GC OKLCH</div>
   </header>
@@ -196,6 +202,13 @@
             <code>sampleColorLUT</code>. Additive plotting builds the glow.
           </p>
           <canvas id="field-lut" class="lutstrip" width="512" height="16"></canvas>
+          <div class="colorout">
+            <span class="colorout-sw" id="field-sw"></span>
+            <div class="colorout-txt">
+              <div class="colorout-oklch" id="field-oklch">--</div>
+              <div class="colorout-hex" id="field-hex">--</div>
+            </div>
+          </div>
         </section>
         <section>
           <h3>Gradient</h3>
@@ -296,7 +309,7 @@
 
 <script type="module">
     // ============================================================
-    // lite-color-engine v1.3 demo - dogfoods the published entry.
+    // lite-color-engine v1.4 demo - dogfoods the published entry.
     // ============================================================
     import {
         parseCSSColor,
@@ -306,7 +319,9 @@
         lerpOklchBufferN,
         packOklchBufferToUint32,
         packOklchBufferToUint32Fast,
-        packOklchBufferToUint32IntoN
+        packOklchBufferToUint32IntoN,
+        formatOklchCss,
+        formatHex
     } from '@zakkster/lite-color-engine';
     import { packOklchBufferToUint32MINDE } from '@zakkster/lite-color-engine/gamut';
 
@@ -321,6 +336,28 @@
     const ac = new AbortController();
     const sig = ac.signal;
     const $ = (id) => document.getElementById(id);
+
+    // Cache every canvas element once - reused by surfaceOf() and the ResizeObserver.
+    const $fieldCanvas = $('field-canvas');
+    const $batchCanvas = $('batch-canvas');
+    const $tierFastEl = $('tier-fast');
+    const $tierAccEl = $('tier-acc');
+    const $tierMindeEl = $('tier-minde');
+
+    // Authored endpoint colors, hoisted and parsed once at module init (zero per-frame work).
+    // Tiers scene: a single vivid warm -> cool sweep.
+    const _ta = new Float32Array(3);   // tiers endpoint A
+    const _tb = new Float32Array(3);   // tiers endpoint B
+    const _tt = new Float32Array(3);   // tiers scratch (interpolation output)
+    // Batch scene: a cool gradient and a warm gradient to crossfade between.
+    const _c0 = new Float32Array(3), _c1 = new Float32Array(3);   // cool A / cool B
+    const _w0 = new Float32Array(3), _w1 = new Float32Array(3);   // warm A / warm B
+    parseCSSColor('oklch(0.62 0.27 25)', _ta, 0);
+    parseCSSColor('oklch(0.66 0.26 265)', _tb, 0);
+    parseCSSColor('oklch(0.72 0.16 210)', _c0, 0);
+    parseCSSColor('oklch(0.55 0.20 280)', _c1, 0);
+    parseCSSColor('oklch(0.70 0.20 40)', _w0, 0);
+    parseCSSColor('oklch(0.62 0.24 10)', _w1, 0);
 
     // Size a canvas to its box in device pixels; rebuild ImageData only on change.
     const surfaceOf = (canvas) => ({ canvas, ctx: null, img: null, u32: null, w: 0, h: 0 });
@@ -374,10 +411,13 @@
     // ============================================================
     // SCENE 01 - PARTICLE FIELD (100k hero)
     // ============================================================
-    const fieldSurf = surfaceOf($('field-canvas'));
+    const fieldSurf = surfaceOf($fieldCanvas);
     const $fOverlay = $('field-overlay');
     const $fGrad = $('field-grad');
     const $fRecolor = $('field-recolor');
+    const $fSw = $('field-sw');
+    const $fOklch = $('field-oklch');
+    const $fHex = $('field-hex');
     const $fSwirl = $('field-swirl');
     const $fSwirlV = $('field-swirl-v');
     const $fCount = $('field-count');
@@ -512,12 +552,28 @@
         }
     };
 
+    // Show a palette's "signature" color (its most-saturated stop) as copy-ready
+    // CSS via the v1.4 formatters. Authoring-time work: runs only on gradient change.
+    const fShowSignature = (key) => {
+        const p = PRESET_KF[key];
+        let best = 0, bestC = -1;
+        for (let i = 0; i < p.n; i++) {
+            const c = p.kf[i * 3 + 1];
+            if (c > bestC) { bestC = c; best = i; }
+        }
+        const off = best * 3;
+        $fOklch.textContent = formatOklchCss(p.kf, off, 1);
+        $fHex.textContent = formatHex(p.kf, off);
+        $fSw.style.setProperty('--sw', formatHex(p.kf, off));
+    };
+
     const fSetGradient = (idx) => {
         fGradIdx = idx & 3;
         const key = PRESET_KEYS[fGradIdx];
         fLut = bakePreset(key);
         $fGrad.textContent = key;
         paintLutStrip();
+        fShowSignature(key);
     };
 
     // Recolor demo: rebuild the LUT from the preset's OKLCH keyframes with the
@@ -546,7 +602,7 @@
     // ============================================================
     // SCENE 02 - BATCH KERNELS
     // ============================================================
-    const batchSurf = surfaceOf($('batch-canvas'));
+    const batchSurf = surfaceOf($batchCanvas);
     const $bLut = $('batch-lut');
     const $bSpeed = $('batch-speed');
     const $bSpeedV = $('batch-speed-v');
@@ -564,13 +620,6 @@
     let bSpeed = 1.0;
     let bUseLut = false;
     let bPackMs = 0, bFrames = 0, bFpsAccum = 0;
-
-    const _c0 = new Float32Array(3), _c1 = new Float32Array(3);
-    const _w0 = new Float32Array(3), _w1 = new Float32Array(3);
-    parseCSSColor('oklch(0.72 0.16 210)', _c0, 0);   // cool A
-    parseCSSColor('oklch(0.55 0.20 280)', _c1, 0);   // cool B
-    parseCSSColor('oklch(0.70 0.20 40)', _w0, 0);    // warm A
-    parseCSSColor('oklch(0.62 0.24 10)', _w1, 0);    // warm B
 
     const bBuildGradients = (w) => {
         bCool = new Float32Array(w * 3);
@@ -621,12 +670,9 @@
     // ============================================================
     // SCENE 03 - ACCURACY TIERS
     // ============================================================
-    const tierFast = surfaceOf($('tier-fast'));
-    const tierAcc = surfaceOf($('tier-acc'));
-    const tierMinde = surfaceOf($('tier-minde'));
-    const _ta = new Float32Array(3), _tb = new Float32Array(3), _tt = new Float32Array(3);
-    parseCSSColor('oklch(0.62 0.27 25)', _ta, 0);
-    parseCSSColor('oklch(0.66 0.26 265)', _tb, 0);
+    const tierFast = surfaceOf($tierFastEl);
+    const tierAcc = surfaceOf($tierAccEl);
+    const tierMinde = surfaceOf($tierMindeEl);
 
     const renderTier = (s, packFn) => {
         if (!sizeSurface(s)) return;
@@ -677,13 +723,19 @@
     };
 
     const ro = new ResizeObserver(() => { scenes[active].resize(); });
-    ro.observe($('field-canvas'));
-    ro.observe($('batch-canvas'));
-    ro.observe($('tier-fast'));
-    ro.observe($('tier-acc'));
-    ro.observe($('tier-minde'));
+    ro.observe($fieldCanvas);
+    ro.observe($batchCanvas);
+    ro.observe($tierFastEl);
+    ro.observe($tierAccEl);
+    ro.observe($tierMindeEl);
 
     // ---- events (all abortable) ----
+    // Event choice: <button> and tab controls use `click` on purpose - it fires on
+    // keyboard activation (Enter/Space) and only when press+release land on the same
+    // element, which is exactly the semantics a button wants. Pointer events are
+    // reserved for the low-level canvas interaction (the field attractor / ignite tap),
+    // where we need the raw press position and immediate response. Mixing them this way
+    // is the accessible pattern, not an inconsistency.
     $tabs.addEventListener('click', (e) => {
         const btn = e.target.closest('button[data-tab]');
         if (btn) switchScene(btn.dataset.tab);
@@ -692,7 +744,7 @@
     // field pointer attractor
     const onPointer = (e) => { fMouseX = e.clientX * DPR; fMouseY = e.clientY * DPR; };
     const offPointer = () => { fMouseX = -1e9; fMouseY = -1e9; };
-    const stage = $('field-canvas');
+    const stage = $fieldCanvas;
     stage.addEventListener('pointerdown', onPointer, { signal: sig });
     stage.addEventListener('pointermove', onPointer, { signal: sig });
     window.addEventListener('pointerup', offPointer, { signal: sig });

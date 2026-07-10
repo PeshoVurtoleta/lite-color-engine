@@ -88,6 +88,25 @@ export function parseCSSColor(str: string, outBuf: Float32Array, offset: number)
 export function parseDisplayP3ToBuffer(str: string, outBuf: Float32Array, offset: number): number;
 
 // ============================================================================
+// Formatters (round-trip emit - authoring layer)
+// ============================================================================
+
+/**
+ * Emits a modern CSS `oklch(L% C H)` string (or with `/ alpha`) from a buffered
+ * OKLCH triplet. Precision is chosen for good visual and numeric round-tripping
+ * through `parseCSSColor`. Alpha is omitted when not supplied or >= 0.9995.
+ * Authoring-time helper (allocates a string); not for per-frame hot paths.
+ */
+export function formatOklchCss(buf: Float32Array, off: number, alpha?: number): string;
+
+/**
+ * Converts an OKLCH triplet to a `#rrggbb` hex string via the accurate sRGB
+ * pack path. Round-trips with `parseHexToBuffer` to within 1 LSB per channel.
+ * Authoring-time helper (allocates a string); not for per-frame hot paths.
+ */
+export function formatHex(buf: Float32Array, off: number): string;
+
+// ============================================================================
 // Convert (Raw Math)
 // ============================================================================
 

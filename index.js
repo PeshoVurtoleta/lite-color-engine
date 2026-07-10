@@ -5,7 +5,9 @@ export {
     parseOklabToBuffer,
     parseOklchToBuffer,
     parseRgbToBuffer,
-    parseDisplayP3ToBuffer
+    parseDisplayP3ToBuffer,
+    formatOklchCss,
+    formatHex
 } from './src/authoring.js';
 
 export { bakeGradientToUint32 } from './src/lut.js';

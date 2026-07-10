@@ -88,8 +88,9 @@ const ms = (x) => x.median.toFixed(2);
 const mcs = (x) => x.mcs.toFixed(1);
 const BUDGET = 1000 / 60; // 16.67 ms
 
-console.log('lite-color-engine v1.3 batch benchmark');
+console.log('lite-color-engine batch/LUT benchmark');
 console.log('N = ' + N.toLocaleString() + ' colors/frame | ' + RUNS + ' runs (median) | ' + process.version);
+console.log('(formatOklchCss / formatHex are authoring-time string emitters - not a hot path, not benchmarked here)');
 console.log('');
 
 console.table({

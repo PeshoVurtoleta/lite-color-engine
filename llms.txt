@@ -1,10 +1,14 @@
-# lite-color-engine - LLM Reference (v1.3)
+# lite-color-engine - LLM Reference (v1.4)
 
 ## Core Exports
 
 ### Parsing
 - `parseCSSColor(str, outBuf, offset)` — Universal parser. Now supports `color(display-p3 r g b / alpha)`
 - `parseDisplayP3ToBuffer(str, outBuf, offset)` — Direct P3 parser
+
+### Formatters (v1.4, authoring-time - allocate a string)
+- `formatOklchCss(buf, off, alpha?)` - OKLCH triplet -> `oklch(L% C H)` (or `/ alpha`); round-trips via parseCSSColor.
+- `formatHex(buf, off)` - OKLCH triplet -> `#rrggbb` via the accurate pack path; round-trips with parseHexToBuffer within 1 LSB.
 
 ### Conversion
 - `sRgbToOklchBuffer(r, g, b, out, off)`
