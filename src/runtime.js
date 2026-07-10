@@ -1,4 +1,5 @@
 import { lerp, lerpAngle } from '@zakkster/lite-lerp';
+import { oklchToLinearP3 } from './convert.js';
 
 const DEG_TO_RAD = Math.PI / 180;
 
@@ -7,7 +8,7 @@ const DEG_TO_RAD = Math.PI / 180;
  *
  * Hue is canonicalized to [0, 360) via `lerpAngle` (shortest-path) so gradients
  * never wrap the long way around the color wheel. Lightness is hard-clamped
- * to [0, 1] and chroma to [0, +∞).
+ * to [0, 1] and chroma to [0, +inf).
  *
  * Source and destination may be the same buffer at different offsets.
  *
@@ -60,7 +61,6 @@ const oklchToLinearSrgbClamped = (l, c, h, outRgb) => {
     const b = -0.0041960863 * lms_l - 0.7034186147 * lms_m + 1.7076147010 * lms_s;
 
     // Hard gamut clamp (fast path; replaces the expensive MINDE algorithm).
-    // Chroma reduction (Lab-space gamut mapping) is planned for v1.1.
     outRgb[0] = r < 0 ? 0 : (r > 1 ? 1 : r);
     outRgb[1] = g < 0 ? 0 : (g > 1 ? 1 : g);
     outRgb[2] = b < 0 ? 0 : (b > 1 ? 1 : b);
@@ -68,11 +68,14 @@ const oklchToLinearSrgbClamped = (l, c, h, outRgb) => {
 
 // Module-level scratch (zero-GC: single allocation at module load).
 const _scratchRgb = new Float32Array(3);
+const _scratchRgbP3 = new Float32Array(3);
 
 /**
  * Encodes a linear-light channel (already clamped to [0, 1]) to an sRGB
  * 8-bit byte using the proper IEC 61966-2-1 transfer function. Round-tripping
  * sRGB(255-bytes) -> OKLCH -> here recovers the original byte exactly.
+ *
+ * This is also the correct transfer function for Display P3.
  * @internal
  */
 const linearToSrgbByte = (c) => {
@@ -84,7 +87,7 @@ const linearToSrgbByte = (c) => {
 
 /**
  * Converts an OKLCH buffer triplet to a 32-bit unsigned integer in
- * little-endian RGBA byte order — the format consumed directly by a
+ * little-endian RGBA byte order - the format consumed directly by a
  * `Uint32Array` view of `Canvas ImageData`.
  *
  * Uses the proper sRGB transfer function (`pow(c, 1/2.4)` branch). For a
@@ -133,9 +136,66 @@ export const packOklchBufferToUint32Fast = (buf, offset, alpha = 1.0) => {
 };
 
 /**
+ * Internal helper: OKLCH -> linear Display P3 with hard clamp to [0,1].
+ * Mirrors the structure of oklchToLinearSrgbClamped but targets the wider P3 gamut.
+ * @internal
+ */
+const oklchToLinearP3Clamped = (l, c, h, outRgb) => {
+    oklchToLinearP3(l, c, h, outRgb);
+    outRgb[0] = outRgb[0] < 0 ? 0 : (outRgb[0] > 1 ? 1 : outRgb[0]);
+    outRgb[1] = outRgb[1] < 0 ? 0 : (outRgb[1] > 1 ? 1 : outRgb[1]);
+    outRgb[2] = outRgb[2] < 0 ? 0 : (outRgb[2] > 1 ? 1 : outRgb[2]);
+};
+
+/**
+ * Converts an OKLCH buffer triplet to a 32-bit unsigned integer in
+ * little-endian RGBA byte order, encoded for **Display P3** color space.
+ *
+ * Use this when your canvas context was created with `{ colorSpace: 'display-p3' }`.
+ * Colors that are out of sRGB but inside P3 will be preserved with higher
+ * saturation than the regular sRGB packers.
+ *
+ * The transfer function is identical to sRGB (IEC 61966-2-1).
+ *
+ * @param {Float32Array} buf - Buffer containing the OKLCH triplet
+ * @param {number} offset - Start index in the buffer
+ * @param {number} [alpha=1.0] - Alpha [0, 1]; values outside the range are clamped
+ * @returns {number} 32-bit unsigned integer (little-endian RGBA byte order)
+ */
+export const packOklchBufferToUint32P3 = (buf, offset, alpha = 1.0) => {
+    oklchToLinearP3Clamped(buf[offset], buf[offset + 1], buf[offset + 2], _scratchRgbP3);
+    const r8 = linearToSrgbByte(_scratchRgbP3[0]);
+    const g8 = linearToSrgbByte(_scratchRgbP3[1]);
+    const b8 = linearToSrgbByte(_scratchRgbP3[2]);
+    const a8 = alpha <= 0 ? 0 : (alpha >= 1 ? 255 : (alpha * 255 + 0.5) | 0);
+    return ((a8 << 24) | (b8 << 16) | (g8 << 8) | r8) >>> 0;
+};
+
+/**
+ * Faster, less accurate sibling of {@link packOklchBufferToUint32P3}.
+ *
+ * Uses `Math.sqrt` approximation for the transfer function (same trade-off as
+ * the sRGB fast path). Useful for high-volume particle systems or when
+ * baking many P3 gradients where absolute round-trip precision is not critical.
+ *
+ * @param {Float32Array} buf - Buffer containing the OKLCH triplet
+ * @param {number} offset - Start index in the buffer
+ * @param {number} [alpha=1.0] - Alpha [0, 1]; values outside the range are clamped
+ * @returns {number} 32-bit unsigned integer (little-endian RGBA byte order)
+ */
+export const packOklchBufferToUint32P3Fast = (buf, offset, alpha = 1.0) => {
+    oklchToLinearP3Clamped(buf[offset], buf[offset + 1], buf[offset + 2], _scratchRgbP3);
+    const r8 = (Math.sqrt(_scratchRgbP3[0]) * 255) | 0;
+    const g8 = (Math.sqrt(_scratchRgbP3[1]) * 255) | 0;
+    const b8 = (Math.sqrt(_scratchRgbP3[2]) * 255) | 0;
+    const a8 = alpha <= 0 ? 0 : (alpha >= 1 ? 255 : (alpha * 255) | 0);
+    return ((a8 << 24) | (b8 << 16) | (g8 << 8) | r8) >>> 0;
+};
+
+/**
  * Zero-GC LUT sampler. Looks up a baked gradient color by `t` in [0, 1].
  *
- * Performs an inline clamp + bitwise-truncated index — no allocations, no
+ * Performs an inline clamp + bitwise-truncated index - no allocations, no
  * function calls, no bounds checks beyond the single comparison pair. Use
  * inside particle systems, shader-style canvas loops, etc.
  *

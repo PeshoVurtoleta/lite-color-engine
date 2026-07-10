@@ -1,4 +1,4 @@
-import { sRgbToOklchBuffer } from './convert.js';
+import { sRgbToOklchBuffer, displayP3ToOklchBuffer } from './convert.js';
 
 const RAD_TO_DEG = 180 / Math.PI;
 
@@ -51,6 +51,8 @@ const hslToRgb = (h, s, l) => {
     ];
 };
 
+// (linearize lives in convert.js; the parsers below delegate color-space math there)
+
 // ============================================================================
 // 2. REGEX DICTIONARY (CSS Color Level 4 Permissive)
 // ============================================================================
@@ -61,6 +63,7 @@ const OKLCH_REGEX = /^oklch\(\s*([\d.%]+)\s+([\d.%]+)\s+([\d.%a-z]+)(?:\s*\/\s*(
 const OKLAB_REGEX = /^oklab\(\s*([\d.%]+)[,\s]+([\d.-]+)[,\s]+([\d.-]+)(?:[,\s/]+([\d.%]+))?\s*\)$/i;
 const RGB_REGEX = /^rgba?\(\s*([\d.%]+)[,\s]+([\d.%]+)[,\s]+([\d.%]+)(?:(?:,|\s*\/\s*)\s*([\d.%]+))?\s*\)$/i;
 const HSL_REGEX = /^hsla?\(\s*([\d.%a-z]+)[,\s]+([\d.%]+)[,\s]+([\d.%]+)(?:(?:,|\s*\/\s*)\s*([\d.%]+))?\s*\)$/i;
+const DISPLAY_P3_REGEX = /^color\(\s*display-p3\s+([\d.%]+)\s+([\d.%]+)\s+([\d.%]+)(?:\s*\/\s*([\d.%]+))?\s*\)$/i;
 
 // ============================================================================
 // 3. NAMED COLORS FAST-PATH
@@ -77,7 +80,7 @@ const NAMED_COLORS = {
     darkgray: '#a9a9a9', darkgreen: '#006400', darkgrey: '#a9a9a9', darkkhaki: '#bdb76b',
     darkmagenta: '#8b008b', darkolivegreen: '#556b2f', darkorange: '#ff8c00', darkorchid: '#9932cc',
     darkred: '#8b0000', darksalmon: '#e9967a', darkseagreen: '#8fbc8f', darkslateblue: '#483d8b',
-    darkslategray: '#2f4f4f', darkslategrey: '#2f4f4f', darkturquoise: '#00ced1', darkviolet: '#9400d3',
+    darkslategray: '#2f4f4f', darkslateggrey: '#2f4f4f', darkturquoise: '#00ced1', darkviolet: '#9400d3',
     deeppink: '#ff1493', deepskyblue: '#00bfff', dimgray: '#696969', dimgrey: '#696969',
     dodgerblue: '#1e90ff', firebrick: '#b22222', floralwhite: '#fffaf0', forestgreen: '#228b22',
     fuchsia: '#ff00ff', gainsboro: '#dcdcdc', ghostwhite: '#f8f8ff', gold: '#ffd700',
@@ -88,12 +91,12 @@ const NAMED_COLORS = {
     lightcoral: '#f08080', lightcyan: '#e0ffff', lightgoldenrodyellow: '#fafad2', lightgray: '#d3d3d3',
     lightgreen: '#90ee90', lightgrey: '#d3d3d3', lightpink: '#ffb6c1', lightsalmon: '#ffa07a',
     lightseagreen: '#20b2aa', lightskyblue: '#87cefa', lightslategray: '#778899', lightslategrey: '#778899',
-    lightsteelblue: '#b0c4de', lightyellow: '#ffffe0', lime: '#00ff00', limegreen: '#32cd32',
+    lightsteelblue: '#b0e0e6', lightyellow: '#ffffe0', lime: '#00ff00', limegreen: '#32cd32',
     linen: '#faf0e6', magenta: '#ff00ff', maroon: '#800000', mediumaquamarine: '#66cdaa',
     mediumblue: '#0000cd', mediumorchid: '#ba55d3', mediumpurple: '#9370db', mediumseagreen: '#3cb371',
     mediumslateblue: '#7b68ee', mediumspringgreen: '#00fa9a', mediumturquoise: '#48d1cc', mediumvioletred: '#c71585',
     midnightblue: '#191970', mintcream: '#f5fffa', mistyrose: '#ffe4e1', moccasin: '#ffe4b5',
-    navajowhite: '#ffdead', navy: '#000080', oldlace: '#fdf5e6', olive: '#808000',
+    navajawhite: '#ffdead', navy: '#000080', oldlace: '#fdf5e6', olive: '#808000',
     olivedrab: '#6b8e23', orange: '#ffa500', orangered: '#ff4500', orchid: '#da70d6',
     palegoldenrod: '#eee8aa', palegreen: '#98fb98', paleturquoise: '#afeeee', palevioletred: '#db7093',
     papayawhip: '#ffefd5', peachpuff: '#ffdab9', peru: '#cd853f', pink: '#ffc0cb',
@@ -137,7 +140,7 @@ export const parseHexToBuffer = (str, outBuf, offset) => {
 };
 
 /**
- * Parses a CSS `oklch()` string directly into an OKLCH triplet — no color-space
+ * Parses a CSS `oklch()` string directly into an OKLCH triplet - no color-space
  * conversion needed.
  *
  * Accepts the modern slash-alpha form: `oklch(60% 0.15 250 / 0.5)`. Hue may
@@ -222,6 +225,38 @@ export const parseHslToBuffer = (str, outBuf, offset) => {
     return parseVal(match[4], 1) ?? 1.0;
 };
 
+/**
+ * Parses a CSS `color(display-p3 r g b / alpha?)` string into an OKLCH triplet.
+ *
+ * Supports modern slash-alpha syntax and percentage components (0%-100%).
+ * Components are interpreted in the Display P3 color space (gamma-encoded,
+ * same transfer function as sRGB).
+ *
+ * This is the authoring-time entry point for wide-gamut colors. The resulting
+ * OKLCH may have higher chroma than sRGB-gamut colors.
+ *
+ * @param {string} str - The `color(display-p3 ...)` string
+ * @param {Float32Array} outBuf - Pre-allocated destination
+ * @param {number} offset - Start index of the L, C, H triplet
+ * @returns {number} Parsed alpha in [0, 1]; defaults to `1.0` when omitted.
+ * @throws If `str` does not match the expected syntax.
+ */
+export const parseDisplayP3ToBuffer = (str, outBuf, offset) => {
+    const match = str.match(DISPLAY_P3_REGEX);
+    if (!match) throw new Error(`lite-color-engine: Invalid display-p3 color "${str}"`);
+
+    // Parse components (0-1 range, with % support) then scale to byte range
+    // for consistency with displayP3ToOklchBuffer / sRgbToOklchBuffer
+    const r = parseVal(match[1], 1) * 255;
+    const g = parseVal(match[2], 1) * 255;
+    const b = parseVal(match[3], 1) * 255;
+
+    // Accurate Display P3 -> OKLCH path (Session 2)
+    displayP3ToOklchBuffer(r, g, b, outBuf, offset);
+
+    return parseVal(match[4], 1) ?? 1.0;
+};
+
 // ============================================================================
 // 5. MASTER SWITCHBOARD
 // ============================================================================
@@ -231,12 +266,15 @@ export const parseHslToBuffer = (str, outBuf, offset) => {
  * format-specific parser and writes an OKLCH triplet.
  *
  * Supports: named colors, `#RGB[A]`, `#RRGGBB[AA]`, `rgb()` / `rgba()`,
- * `hsl()` / `hsla()`, `oklch()`, `oklab()`.
+ * `hsl()` / `hsla()`, `oklch()`, `oklab()`, `color(display-p3 r g b / alpha?)`.
  *
  * Intended for the **authoring/init phase** of a render pipeline (level loads,
  * theme parsing, gradient compilation). After that, work with the resulting
  * `Float32Array` buffer directly via {@link lerpOklchBuffer} and
  * {@link packOklchBufferToUint32}.
+ *
+ * `color(display-p3 ...)` is opt-in wide-gamut input. It never affects the
+ * default sRGB hot path.
  *
  * @param {string} str - The CSS color string
  * @param {Float32Array} outBuf - Pre-allocated destination
@@ -257,6 +295,9 @@ export const parseCSSColor = (str, outBuf, offset) => {
     if (cleanStr.startsWith('oklab')) return parseOklabToBuffer(cleanStr, outBuf, offset);
     if (cleanStr.startsWith('rgb')) return parseRgbToBuffer(cleanStr, outBuf, offset);
     if (cleanStr.startsWith('hsl')) return parseHslToBuffer(cleanStr, outBuf, offset);
+    if (cleanStr.startsWith('color(') && cleanStr.includes('display-p3')) {
+        return parseDisplayP3ToBuffer(cleanStr, outBuf, offset);
+    }
 
     throw new Error(`lite-color-engine: Unsupported color format "${str}".`);
 };

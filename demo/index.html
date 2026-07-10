@@ -1,0 +1,628 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>lite-color-engine v1.2 - Zero-GC OKLCH</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            /* hex fallback first, oklch second (browsers ignoring oklch keep the hex) */
+            --bg-0: #000102;        --bg-0: oklch(0.06 0.01 240);
+            --bg-1: #010305;        --bg-1: oklch(0.09 0.015 240);
+            --bg-2: #01060c;        --bg-2: oklch(0.12 0.02 240);
+            --bg-3: #030c15;        --bg-3: oklch(0.15 0.025 240);
+            --line: rgba(255,255,255,0.06);        --line: oklch(1 0 0 / 0.06);
+            --line-strong: rgba(255,255,255,0.14); --line-strong: oklch(1 0 0 / 0.14);
+            --text: #dbd7d0;        --text: oklch(0.88 0.01 80);
+            --text-dim: #81878c;    --text-dim: oklch(0.62 0.01 240);
+            --text-faint: #484e52;  --text-faint: oklch(0.42 0.01 240);
+            --green: #6fe276;       --green: oklch(0.82 0.18 145);
+            --cyan: #50d9ef;        --cyan: oklch(0.82 0.12 210);
+            --amber: #f0bb3b;       --amber: oklch(0.82 0.15 85);
+            --glow-green: 0 0 12px rgba(111,226,118,0.55);
+        }
+
+        *, *::before, *::after { box-sizing: border-box; }
+
+        html, body {
+            height: 100dvh;
+            margin: 0;
+            background: var(--bg-0);
+            color: var(--text);
+            font-family: 'JetBrains Mono', ui-monospace, monospace;
+            font-size: clamp(12px, 0.85rem + 0.1vw, 13px);
+            line-height: 1.5;
+            overflow: hidden;
+        }
+
+        body::after {
+            content: "";
+            position: fixed;
+            inset: 0;
+            background: repeating-linear-gradient(
+                0deg,
+                transparent 0px, transparent 2px,
+                rgba(255,255,255,0.014) 2px, rgba(255,255,255,0.014) 3px
+            );
+            pointer-events: none;
+            z-index: 1;
+        }
+
+        #app {
+            position: relative;
+            z-index: 2;
+            height: 100dvh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        header {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            padding: 0.875rem 1.5rem;
+            border-bottom: 1px solid var(--line);
+            background: linear-gradient(to bottom, var(--bg-1), var(--bg-0));
+        }
+
+        .brand {
+            font-family: 'Space Mono', monospace;
+            font-weight: 700;
+            font-size: 1.05rem;
+            letter-spacing: -0.02em;
+        }
+
+        .brand .mark { color: var(--green); }
+
+        .meta {
+            margin-left: auto;
+            color: var(--text-dim);
+            font-size: 0.75rem;
+            letter-spacing: 0.04em;
+        }
+
+        nav.tabs {
+            display: flex;
+            background: var(--bg-1);
+            border-bottom: 1px solid var(--line);
+            padding: 0 1.125rem;
+        }
+
+        nav.tabs button {
+            background: none;
+            border: 0;
+            color: var(--text-dim);
+            font-family: inherit;
+            font-size: 0.75rem;
+            padding: 0.75rem 1.25rem;
+            cursor: pointer;
+            letter-spacing: 0.02em;
+            position: relative;
+            transition: color 0.15s ease;
+        }
+
+        @media (hover: hover) {
+            nav.tabs button:hover { color: var(--text); }
+        }
+
+        nav.tabs button[aria-current="true"] { color: var(--green); }
+
+        nav.tabs button[aria-current="true"]::after {
+            content: "";
+            position: absolute;
+            left: 1.25rem;
+            right: 1.25rem;
+            bottom: -1px;
+            height: 2px;
+            background: var(--green);
+            box-shadow: var(--glow-green);
+        }
+
+        main { flex: 1; min-height: 0; display: flex; position: relative; }
+
+        .scene { flex: 1; display: none; min-height: 0; }
+        .scene[data-active] { display: flex; }
+
+        .stage {
+            flex: 1;
+            min-height: 0;
+            position: relative;
+            overflow: hidden;
+            background: #000;
+        }
+
+        .stage.tiers { display: flex; gap: 1px; background: var(--line); }
+
+        .tier-cell { flex: 1; position: relative; background: #000; }
+
+        .tier-label {
+            position: absolute;
+            top: 0.75rem;
+            left: 0.75rem;
+            font-size: 0.6875rem;
+            letter-spacing: 0.1em;
+            color: var(--text);
+            background: rgba(0,0,0,0.6);
+            padding: 2px 8px;
+            border-radius: 2px;
+        }
+
+        canvas { display: block; width: 100%; height: 100%; }
+
+        .panel {
+            width: clamp(280px, 24rem, 340px);
+            border-left: 1px solid var(--line);
+            background: var(--bg-1);
+            display: flex;
+            flex-direction: column;
+            overflow-y: auto;
+        }
+
+        .panel-head {
+            padding: 1rem 1.25rem 0.5rem;
+            font-size: 0.625rem;
+            letter-spacing: 0.18em;
+            text-transform: uppercase;
+            color: var(--text-faint);
+            border-bottom: 1px solid var(--line);
+        }
+
+        section {
+            padding: 1.25rem;
+            border-bottom: 1px solid var(--line);
+        }
+
+        h3 {
+            margin: 0 0 0.875rem;
+            font-size: 0.625rem;
+            font-weight: 700;
+            letter-spacing: 0.16em;
+            text-transform: uppercase;
+            color: var(--cyan);
+        }
+
+        .btn-row { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+
+        button.btn {
+            font-family: inherit;
+            font-size: 0.6875rem;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+            background: var(--bg-3);
+            color: var(--text);
+            border: 1px solid var(--line-strong);
+            padding: 0.5rem 0.875rem;
+            cursor: pointer;
+            transition: color 0.12s ease, background 0.12s ease, border-color 0.12s ease;
+        }
+
+        @media (hover: hover) {
+            button.btn:hover {
+                background: var(--bg-2);
+                border-color: var(--green);
+                color: var(--green);
+            }
+            button.btn.primary:hover { filter: brightness(1.08); }
+        }
+
+        button.btn.primary {
+            background: var(--green);
+            color: var(--bg-0);
+            border-color: var(--green);
+            font-weight: 700;
+        }
+
+        .field { margin-bottom: 1rem; }
+        .field:last-child { margin-bottom: 0; }
+
+        .field label {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.625rem;
+            letter-spacing: 0.08em;
+            color: var(--text-faint);
+            text-transform: uppercase;
+            margin-bottom: 0.35rem;
+        }
+
+        .field-value { color: var(--green); font-weight: 700; }
+
+        input[type="range"] { width: 100%; accent-color: var(--green); }
+
+        .note { font-size: 0.75rem; color: var(--text-dim); line-height: 1.6; margin: 0; }
+        .note code {
+            color: var(--cyan);
+            background: var(--bg-3);
+            padding: 0 0.25rem;
+            border-radius: 2px;
+        }
+
+        footer.telemetry {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+            border-top: 1px solid var(--line);
+            background: var(--bg-1);
+            font-size: 0.75rem;
+        }
+
+        .tele { padding: 0.625rem 1rem; border-right: 1px solid var(--line); }
+        .tele:last-child { border-right: 0; }
+
+        .tele .k {
+            font-size: 0.625rem;
+            letter-spacing: 0.14em;
+            text-transform: uppercase;
+            color: var(--text-faint);
+        }
+
+        .tele .v {
+            font-size: 1rem;
+            font-weight: 500;
+            font-variant-numeric: tabular-nums;
+            color: var(--text);
+        }
+
+        .tele .v.accent { color: var(--green); }
+
+        .legend { display: flex; gap: 1.25rem; font-size: 0.75rem; }
+        .legend .chip { display: flex; align-items: center; gap: 0.5rem; }
+
+        .swatch { width: 10px; height: 10px; border-radius: 50%; }
+        .swatch.s { background: var(--green); }
+        .swatch.c { background: var(--cyan); }
+    </style>
+</head>
+<body>
+<div id="app">
+    <header>
+        <div class="brand"><span class="mark">&#9680;</span> lite-color-engine</div>
+        <div class="meta">v1.2.0 &middot; Zero-GC OKLCH &middot; P3 Ready</div>
+    </header>
+
+    <nav class="tabs" id="tabs">
+        <button data-tab="live" aria-current="true">Live Gradient</button>
+        <button data-tab="tiers" aria-current="false">Accuracy Tiers</button>
+    </nav>
+
+    <main>
+        <!-- LIVE GRADIENT SCENE -->
+        <section class="scene" data-scene="live" data-active>
+            <div class="stage">
+                <canvas id="live-canvas"></canvas>
+            </div>
+            <aside class="panel">
+                <div class="panel-head">Live Gradient</div>
+                <section>
+                    <h3>Playback</h3>
+                    <div class="btn-row">
+                        <button class="btn primary" id="btn-play" type="button">Pause</button>
+                        <button class="btn" id="btn-p3" type="button">Use Display P3</button>
+                    </div>
+                </section>
+                <section>
+                    <h3>Gradient</h3>
+                    <div class="field">
+                        <label>Stops <span class="field-value" id="stops-val">5</span></label>
+                        <input type="range" id="stops" min="2" max="8" value="5" step="1">
+                    </div>
+                    <div class="field">
+                        <label>Speed <span class="field-value" id="speed-val">1.2x</span></label>
+                        <input type="range" id="speed" min="0.3" max="3.5" step="0.1" value="1.2">
+                    </div>
+                </section>
+                <section>
+                    <h3>Pipeline</h3>
+                    <p class="note">
+                        Colors parsed once into a <code>Float32Array</code> OKLCH buffer, then
+                        interpolated and packed straight into <code>ImageData</code> every frame.
+                        No allocations on the hot path.
+                    </p>
+                </section>
+            </aside>
+        </section>
+
+        <!-- ACCURACY TIERS SCENE -->
+        <section class="scene" data-scene="tiers">
+            <div class="stage tiers">
+                <div class="tier-cell">
+                    <canvas id="canvas-fast"></canvas>
+                    <div class="tier-label">FAST (sqrt approx)</div>
+                </div>
+                <div class="tier-cell">
+                    <canvas id="canvas-accurate"></canvas>
+                    <div class="tier-label">ACCURATE (clamp)</div>
+                </div>
+                <div class="tier-cell">
+                    <canvas id="canvas-gamut"></canvas>
+                    <div class="tier-label">GAMUT-MAPPED (MINDE)</div>
+                </div>
+            </div>
+            <aside class="panel">
+                <div class="panel-head">Accuracy Comparison</div>
+                <section>
+                    <p class="note">
+                        The same vivid OKLCH gradient packed three ways. FAST substitutes
+                        <code>sqrt</code> for the sRGB transfer (~10/255 midtone drift). ACCURATE
+                        uses the true transfer with a hard gamut clamp. GAMUT-MAPPED runs MINDE
+                        chroma reduction (from the <code>/gamut</code> subpath) to preserve hue
+                        near the gamut boundary.
+                    </p>
+                </section>
+            </aside>
+        </section>
+    </main>
+
+    <footer class="telemetry">
+        <div class="tele"><span class="k">FPS</span><br><span class="v accent" id="t-fps">--</span></div>
+        <div class="tele"><span class="k">Mode</span><br><span class="v" id="t-mode">sRGB</span></div>
+        <div class="tele"><span class="k">Allocs / frame</span><br><span class="v accent" id="t-alloc">0</span></div>
+        <div class="tele"><span class="k">Status</span><br><span class="v accent" id="t-status">running</span></div>
+    </footer>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "@zakkster/lite-lerp": "https://cdn.jsdelivr.net/npm/@zakkster/lite-lerp",
+    "@zakkster/lite-color-engine": "../index.js",
+    "@zakkster/lite-color-engine/gamut": "../src/Gamut.js"
+  }
+}
+</script>
+
+<script type="module">
+    // ============================================================
+    // lite-color-engine v1.2 demo - dogfoods the published entry.
+    // Bare specifiers above resolve via the importmap; the engine's
+    // own `import '@zakkster/lite-lerp'` resolves to the CDN.
+    // ============================================================
+    import {
+        parseCSSColor,
+        lerpOklchBuffer,
+        packOklchBufferToUint32,
+        packOklchBufferToUint32Fast,
+        packOklchBufferToUint32P3
+    } from '@zakkster/lite-color-engine';
+    import { packOklchBufferToUint32MINDE } from '@zakkster/lite-color-engine/gamut';
+
+    // ---- constants ----
+    const DPR = Math.min(2, window.devicePixelRatio || 1);
+    const MAX_DT = 1 / 30;         // clamp dt after tab-away so scroll never jumps
+    const SCROLL_RATE = 0.15;      // gradient scroll (cycles/second at 1x speed)
+    const FPS_WINDOW = 0.5;        // seconds between fps samples
+
+    // ---- teardown ----
+    const ac = new AbortController();
+    const sig = ac.signal;
+
+    // ---- cached DOM refs (all lookups happen once, here) ----
+    const $ = (id) => document.getElementById(id);
+    const $tabs = $('tabs');
+    const $scenes = document.querySelectorAll('.scene');
+    const $liveCanvas = $('live-canvas');
+    const $btnPlay = $('btn-play');
+    const $btnP3 = $('btn-p3');
+    const $stops = $('stops');
+    const $stopsVal = $('stops-val');
+    const $speed = $('speed');
+    const $speedVal = $('speed-val');
+    const $fast = $('canvas-fast');
+    const $accurate = $('canvas-accurate');
+    const $gamut = $('canvas-gamut');
+    const $tFps = $('t-fps');
+    const $tMode = $('t-mode');
+    const $tAlloc = $('t-alloc');
+    const $tStatus = $('t-status');
+
+    // ---- shared scratch (module-scope, never re-allocated) ----
+    const _lerp = new Float32Array(3);   // interpolation output
+    const _a = new Float32Array(3);      // gradient endpoint A (parsed once)
+    const _b = new Float32Array(3);      // gradient endpoint B (parsed once)
+    parseCSSColor('oklch(0.62 0.27 25)', _a, 0);    // vivid warm
+    parseCSSColor('oklch(0.66 0.26 265)', _b, 0);   // vivid cool
+
+    // Replicate row 0 down the whole buffer via exponential doubling (log2(h) memcpys).
+    const fillRowsDown = (u32, w, h) => {
+        let filled = 1;
+        while (filled < h) {
+            const n = filled < h - filled ? filled : h - filled;
+            u32.copyWithin(filled * w, 0, n * w);
+            filled += n;
+        }
+    };
+
+    const surfaceOf = (canvas) => ({ canvas, ctx: null, img: null, u32: null, w: 0, h: 0 });
+
+    // Size a canvas to its box in device pixels; (re)build the ImageData only
+    // when the pixel dimensions actually change. Returns false while hidden (0x0).
+    const sizeSurface = (s) => {
+        const rect = s.canvas.getBoundingClientRect();
+        const w = Math.max(0, Math.round(rect.width * DPR));
+        const h = Math.max(0, Math.round(rect.height * DPR));
+        if (w === 0 || h === 0) { s.w = 0; s.h = 0; return false; }
+        if (!s.ctx) s.ctx = s.canvas.getContext('2d', { alpha: false });
+        if (w !== s.w || h !== s.h) {
+            s.canvas.width = w;
+            s.canvas.height = h;
+            s.img = s.ctx.createImageData(w, h);
+            s.u32 = new Uint32Array(s.img.data.buffer);
+            s.w = w;
+            s.h = h;
+        }
+        return true;
+    };
+
+    // ================= LIVE GRADIENT =================
+    const live = surfaceOf($liveCanvas);
+    let liveStops = new Float32Array(0);  // packed [L,C,H] triples
+    let liveStopCount = 0;
+    let liveUseP3 = false;
+    let livePlaying = true;
+    let liveTime = 0;
+    let liveSpeed = 1.2;
+
+    // Authoring-time allocation only (never on the hot path).
+    const setStops = (count) => {
+        liveStopCount = count;
+        liveStops = new Float32Array(count * 3);
+        for (let i = 0; i < count; i++) {
+            parseCSSColor(`oklch(0.65 0.22 ${(i / count) * 360})`, liveStops, i * 3);
+        }
+    };
+
+    const renderLive = () => {
+        if (live.w === 0 || liveStopCount < 2) return;
+        const w = live.w, h = live.h, u32 = live.u32;
+        const packFn = liveUseP3 ? packOklchBufferToUint32P3 : packOklchBufferToUint32;
+        const n = liveStopCount;
+        const scroll = liveTime * SCROLL_RATE;
+        for (let x = 0; x < w; x++) {
+            const t = (x / w + scroll) % 1;
+            const seg = t * n;
+            const idx = seg | 0;
+            const ia = (idx % n) * 3;
+            const ib = ((idx + 1) % n) * 3;
+            lerpOklchBuffer(liveStops, ia, liveStops, ib, seg - idx, _lerp, 0);
+            u32[x] = packFn(_lerp, 0);
+        }
+        fillRowsDown(u32, w, h);
+        live.ctx.putImageData(live.img, 0, 0);
+    };
+
+    // ================= ACCURACY TIERS =================
+    const tierFast = surfaceOf($fast);
+    const tierAccurate = surfaceOf($accurate);
+    const tierGamut = surfaceOf($gamut);
+
+    const renderTier = (s, packFn) => {
+        if (!sizeSurface(s)) return;         // skips while the scene is hidden (0x0)
+        const w = s.w, h = s.h, u32 = s.u32;
+        for (let x = 0; x < w; x++) {
+            lerpOklchBuffer(_a, 0, _b, 0, x / w, _lerp, 0);
+            u32[x] = packFn(_lerp, 0);
+        }
+        fillRowsDown(u32, w, h);
+        s.ctx.putImageData(s.img, 0, 0);
+    };
+
+    const renderTiers = () => {
+        renderTier(tierFast, packOklchBufferToUint32Fast);
+        renderTier(tierAccurate, packOklchBufferToUint32);
+        renderTier(tierGamut, packOklchBufferToUint32MINDE);
+    };
+
+    // ================= MASTER LOOP =================
+    let activeScene = 'live';
+    let rafId = 0;
+    let lastNow = 0;
+    let frames = 0;
+    let fpsAccum = 0;
+
+    const frame = (now) => {
+        const dt = lastNow ? Math.min((now - lastNow) / 1000, MAX_DT) : 0;
+        lastNow = now;
+
+        // fps sampling (throttled textContent write)
+        frames++;
+        fpsAccum += dt;
+        if (fpsAccum >= FPS_WINDOW) {
+            $tFps.textContent = Math.round(frames / fpsAccum);
+            frames = 0;
+            fpsAccum = 0;
+        }
+
+        if (activeScene === 'live' && livePlaying) {
+            liveTime += dt * liveSpeed;
+            renderLive();
+        }
+
+        rafId = requestAnimationFrame(frame);
+    };
+
+    // ================= RESIZE =================
+    // Fires on first observe and whenever a canvas resizes - including the
+    // 0 -> real transition when a hidden scene becomes visible. This is what
+    // makes the gradients appear without any manual resize.
+    const ro = new ResizeObserver(() => {
+        if (activeScene === 'live') {
+            sizeSurface(live);
+            if (!livePlaying) renderLive();   // keep the static frame correct while paused
+        } else {
+            renderTiers();
+        }
+    });
+    ro.observe($liveCanvas);
+    ro.observe($fast);
+    ro.observe($accurate);
+    ro.observe($gamut);
+
+    // ================= SCENE SWITCHING =================
+    const switchScene = (name) => {
+        activeScene = name;
+        for (const s of $scenes) {
+            if (s.dataset.scene === name) s.setAttribute('data-active', '');
+            else s.removeAttribute('data-active');
+        }
+        for (const btn of $tabs.children) {
+            btn.setAttribute('aria-current', btn.dataset.tab === name ? 'true' : 'false');
+        }
+        // Scene is now visible, so its canvases have a real box - render immediately.
+        if (name === 'live') { sizeSurface(live); renderLive(); }
+        else renderTiers();
+    };
+
+    // ================= EVENTS (all abortable) =================
+    $tabs.addEventListener('click', (e) => {
+        const btn = e.target.closest('button[data-tab]');
+        if (btn) switchScene(btn.dataset.tab);
+    }, { signal: sig });
+
+    $stops.addEventListener('input', () => {
+        const count = +$stops.value;
+        $stopsVal.textContent = count;
+        setStops(count);
+        if (!livePlaying) renderLive();
+    }, { signal: sig });
+
+    $speed.addEventListener('input', () => {
+        liveSpeed = +$speed.value;
+        $speedVal.textContent = liveSpeed.toFixed(1) + 'x';
+    }, { signal: sig });
+
+    $btnPlay.addEventListener('click', () => {
+        livePlaying = !livePlaying;
+        $btnPlay.textContent = livePlaying ? 'Pause' : 'Play';
+        $tStatus.textContent = livePlaying ? 'running' : 'paused';
+    }, { signal: sig });
+
+    $btnP3.addEventListener('click', () => {
+        liveUseP3 = !liveUseP3;
+        $btnP3.textContent = liveUseP3 ? 'Use sRGB' : 'Use Display P3';
+        $tMode.textContent = liveUseP3 ? 'Display P3' : 'sRGB';
+        if (!livePlaying) renderLive();
+    }, { signal: sig });
+
+    // ================= DISPOSE =================
+    const dispose = () => {
+        cancelAnimationFrame(rafId);
+        ro.disconnect();
+        ac.abort();   // detaches every listener registered with { signal: sig }
+    };
+    window.addEventListener('pagehide', dispose, { signal: sig });
+
+    // ================= BOOT =================
+    // Hook initial UI state from the live controls rather than hardcoding it.
+    liveSpeed = +$speed.value;
+    $stopsVal.textContent = $stops.value;
+    $speedVal.textContent = liveSpeed.toFixed(1) + 'x';
+    $btnPlay.textContent = livePlaying ? 'Pause' : 'Play';
+    $tAlloc.textContent = '0';
+    setStops(+$stops.value);
+    sizeSurface(live);
+    rafId = requestAnimationFrame(frame);
+</script>
+</body>
+</html>

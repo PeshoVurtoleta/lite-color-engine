@@ -1,275 +1,38 @@
-# @zakkster/lite-color-engine — LLM Reference
-
-> Zero-GC, data-oriented OKLCH color engine for WebGL/Canvas rendering pipelines.
-> Buffer-and-offset API. Three layers: authoring (CSS parsing), LUT (gradient
-> baking), runtime (zero-allocation hot path).
-
-## Identity
-
-- **Package name:** `@zakkster/lite-color-engine`
-- **Module type:** ESM only (`"type": "module"`)
-- **Peer dependency:** `@zakkster/lite-lerp` (provides `lerp`, `lerpAngle`)
-- **Bundle:** sub-2KB min+gzip
-- **Side effects:** none (`"sideEffects": false`)
-- **Node:** `>=18`
-
-## Mental model
-
-Every color in this library is exactly **3 contiguous Float32 entries** in a `Float32Array`: `[L, C, H]`.
-
-- `L` (Lightness): `[0, 1]`, perceptually uniform.
-- `C` (Chroma): `[0, ~0.4]` in practice, mathematically unbounded but only a small chroma range maps to displayable sRGB.
-- `H` (Hue): `[0, 360)` degrees. Always canonicalized after every write.
-
-Alpha is **not** stored in the OKLCH buffer. Parsers return alpha as a `number`. If you need alpha alongside color, store it in a sibling `Float32Array` or add a fourth slot yourself (the library only reads the first three).
-
-The output of the pack functions is a 32-bit unsigned integer in **little-endian RGBA byte order** — exactly what `new Uint32Array(imageData.data.buffer)` consumes. Browsers are universally little-endian; do not byte-swap.
-
-## Public API surface
-
-### Authoring (init-time, allocations OK)
-
-```js
-import {
-    parseCSSColor,
-    parseHexToBuffer,
-    parseRgbToBuffer,
-    parseHslToBuffer,
-    parseOklchToBuffer,
-    parseOklabToBuffer,
-} from '@zakkster/lite-color-engine';
-```
-
-All five format-specific parsers and `parseCSSColor` have the same signature:
-
-```ts
-(str: string, outBuf: Float32Array, offset: number) => number /* alpha [0,1] */
-```
-
-`parseCSSColor` dispatches by string prefix. Use it unless you know the format and care about shaving the dispatch.
-
-Throws on invalid input.
-
-### Convert (raw math)
-
-```js
-import { sRgbToOklchBuffer } from '@zakkster/lite-color-engine';
-
-sRgbToOklchBuffer(r, g, b, outBuf, outOffset);
-// r, g, b are 0-255 bytes. Writes 3 floats to outBuf.
-```
-
-### Runtime (zero allocations)
-
-```js
-import {
-    lerpOklchBuffer,
-    packOklchBufferToUint32,
-    packOklchBufferToUint32Fast,
-    sampleColorLUT,
-} from '@zakkster/lite-color-engine';
-```
-
-Signatures:
-
-```ts
-lerpOklchBuffer(
-    bufA: Float32Array, offsetA: number,
-    bufB: Float32Array, offsetB: number,
-    t: number,
-    outBuf: Float32Array, outOffset: number
-): void;
-
-packOklchBufferToUint32(buf: Float32Array, offset: number, alpha?: number): number;
-packOklchBufferToUint32Fast(buf: Float32Array, offset: number, alpha?: number): number;
-
-sampleColorLUT(lut: Uint32Array, t: number): number;
-```
-
-### Difference (ΔE-OK)
-
-```js
-import { deltaEOK } from '@zakkster/lite-color-engine';
-
-deltaEOK(bufA: Float32Array, offsetA: number,
-         bufB: Float32Array, offsetB: number): number;
-```
-
-Euclidean distance in OKLab between two buffered OKLCH colors. Zero allocations. Typical scale: `0.02` indistinguishable, `0.05` subtle, `0.15+` unambiguously different.
-
-### Gamut sub-export (`/gamut`)
-
-```js
-import {
-    gamutMapToSrgbBuffer,
-    packOklchBufferToUint32MINDE,
-} from '@zakkster/lite-color-engine/gamut';
-
-gamutMapToSrgbBuffer(
-    inBuf: Float32Array, inOffset: number,
-    outBuf: Float32Array, outOffset: number
-): void;
-
-packOklchBufferToUint32MINDE(
-    buf: Float32Array, offset: number, alpha?: number
-): number;
-```
-
-CSS Color 4 MINDE chroma-reduction gamut mapping. Bisection on chroma at fixed L and H with a JND threshold. `packOklchBufferToUint32MINDE` is signature-compatible with the core packer, so you can pass it directly as the `packer` argument to `bakeGradientToUint32` to bake gamut-accurate LUTs.
-
-~30× slower than the core packer. Belongs at LUT-build or authoring time, not per-frame.
-
-### Remap sub-export (`/remap`)
-
-```js
-import {
-    sRgba8ToOklabBuffer,
-    oklchToOklabBuffer,
-    oklabToOklchBuffer,
-    nearestPaletteIndexBuffer,
-    remapPixelsToPalette,
-} from '@zakkster/lite-color-engine/remap';
-
-sRgba8ToOklabBuffer(
-    inU8: Uint8Array | Uint8ClampedArray,
-    outLab: Float32Array, pixelCount: number
-): void;
-
-oklchToOklabBuffer(inLch: Float32Array, outLab: Float32Array, pixelCount: number): void;
-oklabToOklchBuffer(inLab: Float32Array, outLch: Float32Array, pixelCount: number): void;
-
-nearestPaletteIndexBuffer(
-    pixelsLab: Float32Array, paletteLab: Float32Array,
-    indicesOut: Uint32Array | Uint16Array | Uint8Array,
-    pixelCount: number, paletteCount: number,
-    opts?: { preserveLightness?: boolean }
-): void;
-
-remapPixelsToPalette(
-    inU8: Uint8Array | Uint8ClampedArray,
-    paletteLch: Float32Array,
-    outU32: Uint32Array,
-    pixelCount: number, paletteCount: number,
-    opts?: { preserveLightness?: boolean }
-): void;
-```
-
-SoA palette-remap kernels. Search happens in OKLab (Euclidean distance). Palette is authored in OKLCH and converted to OKLab once per call. `remapPixelsToPalette` uses grow-only module-level scratch for the palette conversion — no per-frame allocation. Alpha byte from the input passes through unchanged in the output. `preserveLightness` searches by `(a, b)` only and synthesizes output as `(pixel.L, palette.a, palette.b)` — retains shading structure under recolor.
-
-### LUT (gradient baking)
-
-```js
-import { bakeGradientToUint32 } from '@zakkster/lite-color-engine';
-
-bakeGradientToUint32(
-    keyframesBuf: Float32Array,         // [L0,C0,H0, L1,C1,H1, ...]
-    numStops: number,                   // >= 2
-    resolution?: number,                // default 256, >= 2
-    easeFn?: (t: number) => number,
-    packer?: (buf: Float32Array, offset: number, alpha?: number) => number
-): Uint32Array;
-```
-
-## Integration patterns
-
-### Pattern 1 — palette load
-
-```js
-const palette = new Float32Array(3 * COLOR_COUNT);
-const alphas  = new Float32Array(COLOR_COUNT);
-for (let i = 0; i < cssStrings.length; i++) {
-    alphas[i] = parseCSSColor(cssStrings[i], palette, i * 3);
-}
-// palette is now your color storage for the program lifetime.
-```
-
-### Pattern 2 — per-frame tween
-
-```js
-const scratch = new Float32Array(3);   // module-level, allocated ONCE
-
-function frame(t) {
-    lerpOklchBuffer(palette, 0, palette, 3, t, scratch, 0);
-    return packOklchBufferToUint32(scratch, 0, 1.0);
-}
-```
-
-### Pattern 3 — gradient LUT for a particle system
-
-```js
-const stops = new Float32Array(9);
-parseCSSColor('#ff0000', stops, 0);
-parseCSSColor('#ffd700', stops, 3);
-parseCSSColor('#00aaff', stops, 6);
-
-const lut = bakeGradientToUint32(stops, 3, 256);
-
-// In the render loop:
-for (let i = 0; i < particles.count; i++) {
-    const lifeT = particles.life[i];
-    pixels32[particles.pixelIdx[i]] = sampleColorLUT(lut, lifeT);
-}
-```
-
-### Pattern 4 — direct ImageData write
-
-```js
-const imgData = ctx.createImageData(width, height);
-const pixels  = new Uint32Array(imgData.data.buffer);  // RGBA-LE view
-
-for (let i = 0; i < pixels.length; i++) {
-    pixels[i] = sampleColorLUT(lut, i / pixels.length);
-}
-ctx.putImageData(imgData, 0, 0);
-```
-
-## Invariants the library guarantees
-
-- After any successful write, `outBuf[offset + 2]` (hue) is in `[0, 360)`.
-- After any successful write, `outBuf[offset]` (lightness) is in `[0, 1]`.
-- After any successful write, `outBuf[offset + 1]` (chroma) is in `[0, +∞)`.
-- `packOklchBufferToUint32` and `packOklchBufferToUint32Fast` return values that are **always** non-negative integers (they apply `>>> 0`).
-- Hue interpolation is **always** shortest-path (uses `lerpAngle` from `@zakkster/lite-lerp`).
-- Bake output bytes are **always** little-endian RGBA. Same on every browser.
-
-## Common pitfalls
-
-- **Mistaking the byte order.** The pack functions return little-endian RGBA, so on x86 the low byte is R. If you mask with `(packed >> 24) & 0xff` expecting red, you'll get alpha. Use `packed & 0xff` for red.
-
-- **Storing per-color objects anyway.** The library is explicitly buffer-first. If you find yourself writing `{ l, c, h }` wrappers, you've reintroduced GC pressure; just use the offset-based API.
-
-- **Choosing the Fast packer for UI.** `packOklchBufferToUint32Fast` darkens mid-tones by ~10/255 and shifts warm midtones toward black. Use it for transient pixels (particle trails, alpha-blended sprites). Use the accurate variant for anything a designer or QA might compare against the source color.
-
-- **Using non-monotonic eases with the LUT.** `bakeGradientToUint32` clamps eased `t` to `[0, 1]`. Overshoot easings (`easeOutBack`, etc.) get silently capped because a fixed-resolution LUT cannot represent overshoot. If you need overshoot, drive the eased `t` at sample time with `sampleColorLUT(lut, easeFn(t))` instead.
-
-- **Forgetting alpha is returned, not written.** Parsers return alpha. They do not write it to the buffer. If you mix parsers and hand-written buffers, decide on an alpha layout up front (sibling array, stride-4, or per-instance) and stick with it.
-
-## What this library is NOT
-
-- It is not a general-purpose color manipulation library. No `darken`, `lighten`, `mix`, `saturate`, `complement`, etc. methods. Compose your own from the buffer math primitives.
-- The core `packOklchBufferToUint32` uses a hard channel clamp for its runtime fast path. Accurate CSS Color 4 MINDE chroma-reduction gamut mapping ships in the `/gamut` sub-export (see below) — use that at LUT-build or authoring time when the hue-shift artifacts of the hard clamp matter.
-- It is not a CSS parser for everything. It does CSS Color Level 4 colors. It does not handle `color()`, `color-mix()`, relative color syntax, or system colors.
-- It is not async. There are no Promises. Every function is synchronous and side-effect-free (writes only to its `outBuf` argument).
-
-## Performance budget
-
-| Operation | Wall-clock estimate (modern V8, 2024 laptop) |
-|---|---|
-| `parseCSSColor` | ~1µs per call (not the hot path; numbers vary by format) |
-| `lerpOklchBuffer` | ~50ns per call |
-| `packOklchBufferToUint32` | ~150ns per call |
-| `packOklchBufferToUint32Fast` | ~80ns per call |
-| `sampleColorLUT` | ~10ns per call |
-| `bakeGradientToUint32(..., 256)` | ~50µs total |
-
-Absolute numbers depend on hardware. Relative ratios are stable.
-
-## Versioning
-
-`1.0.x` — the locked core public API surface. No breaking changes within the major. Patch releases for bug fixes; minor releases may **add** functions but not remove or rename.
-
-`1.1.0` — adds `deltaEOK` in core, plus two additive sub-exports:
-- `@zakkster/lite-color-engine/gamut` — CSS Color 4 MINDE gamut mapping and an accurate packer.
-- `@zakkster/lite-color-engine/remap` — SoA batch converters and palette-remap kernels.
-
-No breaking changes; the v1.0 surface is untouched. See `CHANGELOG.md` for full details.
+# lite-color-engine — LLM Reference (v1.2)
+
+## Core Exports
+
+### Parsing
+- `parseCSSColor(str, outBuf, offset)` — Universal parser. Now supports `color(display-p3 r g b / alpha)`
+- `parseDisplayP3ToBuffer(str, outBuf, offset)` — Direct P3 parser
+
+### Conversion
+- `sRgbToOklchBuffer(r, g, b, out, off)`
+- `displayP3ToOklchBuffer(r, g, b, out, off)` — New in v1.2
+- `oklchToLinearP3(L, C, H, out)` — Inverse for P3 packing
+
+### Runtime (Hot Path — Zero GC)
+- `lerpOklchBuffer(...)`
+- `packOklchBufferToUint32(buf, off, alpha?)` — Accurate sRGB
+- `packOklchBufferToUint32Fast(...)` — Fast approx
+- `packOklchBufferToUint32P3(buf, off, alpha?)` — Accurate P3 output
+- `packOklchBufferToUint32P3Fast(...)` — Fast P3 output
+
+### Gamut mapping (subpath: `@zakkster/lite-color-engine/gamut`, NOT hot-path)
+- `packOklchBufferToUint32MINDE(buf, off, alpha?)` — MINDE chroma-reduction gamut map. ~30x slower than the core packer; use at LUT-build/authoring time.
+
+### LUT
+- `bakeGradientToUint32(..., packer?)` — Accepts any of the above packers
+
+## Key Principles
+- All hot-path functions are allocation-free
+- P3 is strictly opt-in
+- Use `Float32Array` buffers for everything
+- Prefer `parse*ToBuffer` at init time
+
+## Accuracy Tiers (v1.2)
+1. Fast
+2. Accurate-Clamp (default)
+3. Gamut-Mapped (MINDE)
+
+Use P3 variants when targeting `canvas.getContext('2d', { colorSpace: 'display-p3' })`.
