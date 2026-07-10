@@ -1,628 +1,733 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>lite-color-engine v1.2 - Zero-GC OKLCH</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
-    <style>
-        :root {
-            /* hex fallback first, oklch second (browsers ignoring oklch keep the hex) */
-            --bg-0: #000102;        --bg-0: oklch(0.06 0.01 240);
-            --bg-1: #010305;        --bg-1: oklch(0.09 0.015 240);
-            --bg-2: #01060c;        --bg-2: oklch(0.12 0.02 240);
-            --bg-3: #030c15;        --bg-3: oklch(0.15 0.025 240);
-            --line: rgba(255,255,255,0.06);        --line: oklch(1 0 0 / 0.06);
-            --line-strong: rgba(255,255,255,0.14); --line-strong: oklch(1 0 0 / 0.14);
-            --text: #dbd7d0;        --text: oklch(0.88 0.01 80);
-            --text-dim: #81878c;    --text-dim: oklch(0.62 0.01 240);
-            --text-faint: #484e52;  --text-faint: oklch(0.42 0.01 240);
-            --green: #6fe276;       --green: oklch(0.82 0.18 145);
-            --cyan: #50d9ef;        --cyan: oklch(0.82 0.12 210);
-            --amber: #f0bb3b;       --amber: oklch(0.82 0.15 85);
-            --glow-green: 0 0 12px rgba(111,226,118,0.55);
-        }
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>lite-color-engine · oscilloscope</title>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Space+Mono:wght@400;700&display=swap"
+        rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
 
-        *, *::before, *::after { box-sizing: border-box; }
+    :root {
+      --bg-0: #07090d;
+      --bg-1: #0d1117;
+      --bg-2: #131922;
+      --bg-3: #1a2230;
+      --line: rgba(255, 255, 255, 0.06);
+      --line-strong: rgba(255, 255, 255, 0.14);
+      --text: #d8d6d2;
+      --text-dim: #8b8d94;
+      --text-faint: #555960;
+      --green: #5fe39f;
+      --green: oklch(83% 0.14 158);
+      --green-dim: #2b7a52;
+      --cyan: #7dd3fc;
+      --cyan: oklch(83% 0.09 232);
+      --amber: #f5b942;
+      --amber: oklch(81% 0.14 82);
+      --magenta: #e879a8;
+      --magenta: oklch(72% 0.13 356);
+      --red: #f87171;
+      --glow-green: 0 0 12px rgba(95, 227, 159, 0.6), 0 0 30px rgba(95, 227, 159, 0.22);
+      --glow-magenta: 0 0 12px rgba(232, 121, 168, 0.5);
+    }
 
-        html, body {
-            height: 100dvh;
-            margin: 0;
-            background: var(--bg-0);
-            color: var(--text);
-            font-family: 'JetBrains Mono', ui-monospace, monospace;
-            font-size: clamp(12px, 0.85rem + 0.1vw, 13px);
-            line-height: 1.5;
-            overflow: hidden;
-        }
+    html, body { height: 100%; margin: 0; }
 
-        body::after {
-            content: "";
-            position: fixed;
-            inset: 0;
-            background: repeating-linear-gradient(
-                0deg,
-                transparent 0px, transparent 2px,
-                rgba(255,255,255,0.014) 2px, rgba(255,255,255,0.014) 3px
-            );
-            pointer-events: none;
-            z-index: 1;
-        }
+    body {
+      font-family: 'JetBrains Mono', ui-monospace, monospace;
+      font-size: 13px;
+      line-height: 1.5;
+      color: var(--text);
+      background: var(--bg-0);
+      overflow: hidden;
+      font-feature-settings: "tnum";
+    }
 
-        #app {
-            position: relative;
-            z-index: 2;
-            height: 100dvh;
-            display: flex;
-            flex-direction: column;
-        }
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      background-image:
+        radial-gradient(circle at 20% 0%, rgba(95, 227, 159, 0.05) 0%, transparent 42%),
+        radial-gradient(circle at 82% 100%, rgba(232, 121, 168, 0.04) 0%, transparent 52%);
+      z-index: 0;
+    }
 
-        header {
-            display: flex;
-            align-items: center;
-            gap: 1rem;
-            padding: 0.875rem 1.5rem;
-            border-bottom: 1px solid var(--line);
-            background: linear-gradient(to bottom, var(--bg-1), var(--bg-0));
-        }
+    body::after {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      background: repeating-linear-gradient(0deg,
+        transparent 0, transparent 2px,
+        rgba(255, 255, 255, 0.013) 2px, rgba(255, 255, 255, 0.013) 3px);
+      z-index: 1;
+    }
 
-        .brand {
-            font-family: 'Space Mono', monospace;
-            font-weight: 700;
-            font-size: 1.05rem;
-            letter-spacing: -0.02em;
-        }
+    #app { position: relative; z-index: 2; height: 100vh; display: flex; flex-direction: column; }
 
-        .brand .mark { color: var(--green); }
+    header.top {
+      display: flex;
+      align-items: center;
+      gap: 24px;
+      padding: 14px 24px;
+      border-bottom: 1px solid var(--line);
+      background: linear-gradient(to bottom, var(--bg-1), var(--bg-0));
+    }
 
-        .meta {
-            margin-left: auto;
-            color: var(--text-dim);
-            font-size: 0.75rem;
-            letter-spacing: 0.04em;
-        }
+    .brand { display: flex; align-items: baseline; gap: 12px; font-family: 'Space Mono', 'JetBrains Mono', monospace; }
+    .brand .mark { color: var(--green); font-weight: 700; font-size: 16px; text-shadow: var(--glow-green); }
+    .brand .pkg { color: var(--text); font-weight: 700; font-size: 15px; }
+    .brand .ver { color: var(--text-faint); font-size: 11px; }
 
-        nav.tabs {
-            display: flex;
-            background: var(--bg-1);
-            border-bottom: 1px solid var(--line);
-            padding: 0 1.125rem;
-        }
+    .tagline { color: var(--text-dim); font-size: 11px; margin-left: auto; letter-spacing: 0.04em; text-transform: uppercase; }
+    .tagline .dot {
+      display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+      background: var(--green); box-shadow: var(--glow-green); margin-right: 6px;
+      animation: pulse 2s infinite ease-in-out; vertical-align: 1px;
+    }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
 
-        nav.tabs button {
-            background: none;
-            border: 0;
-            color: var(--text-dim);
-            font-family: inherit;
-            font-size: 0.75rem;
-            padding: 0.75rem 1.25rem;
-            cursor: pointer;
-            letter-spacing: 0.02em;
-            position: relative;
-            transition: color 0.15s ease;
-        }
+    nav.tabs { display: flex; background: var(--bg-1); border-bottom: 1px solid var(--line); padding: 0 18px; }
+    nav.tabs button {
+      background: none; border: 0; color: var(--text-dim); font-family: inherit; font-size: 12px;
+      padding: 12px 18px; cursor: pointer; letter-spacing: 0.02em; position: relative; transition: color .15s;
+    }
+    @media (hover: hover) { nav.tabs button:hover { color: var(--text); } }
+    nav.tabs button[aria-current="true"] { color: var(--green); }
+    nav.tabs button[aria-current="true"]::after {
+      content: ""; position: absolute; left: 12px; right: 12px; bottom: -1px;
+      height: 2px; background: var(--green); box-shadow: var(--glow-green);
+    }
+    nav.tabs .scene-num { color: var(--text-faint); margin-right: 8px; font-weight: 300; }
 
-        @media (hover: hover) {
-            nav.tabs button:hover { color: var(--text); }
-        }
+    main { flex: 1; min-height: 0; display: flex; position: relative; }
+    .scene { flex: 1; display: none; min-height: 0; }
+    .scene[data-active] { display: flex; }
 
-        nav.tabs button[aria-current="true"] { color: var(--green); }
+    .stage { flex: 1; min-height: 0; position: relative; overflow: hidden; }
+    canvas { display: block; width: 100%; height: 100%; }
 
-        nav.tabs button[aria-current="true"]::after {
-            content: "";
-            position: absolute;
-            left: 1.25rem;
-            right: 1.25rem;
-            bottom: -1px;
-            height: 2px;
-            background: var(--green);
-            box-shadow: var(--glow-green);
-        }
+    .panel { width: 320px; border-left: 1px solid var(--line); background: var(--bg-1); display: flex; flex-direction: column; overflow-y: auto; }
+    .panel-head { padding: 16px 20px 8px; font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--text-faint); border-bottom: 1px solid var(--line); }
+    .panel section { padding: 16px 20px; border-bottom: 1px solid var(--line); }
+    .panel section h3 { margin: 0 0 12px; font-size: 10px; font-weight: 700; letter-spacing: 0.16em; text-transform: uppercase; color: var(--cyan); }
 
-        main { flex: 1; min-height: 0; display: flex; position: relative; }
+    .help-line { color: var(--text-dim); font-size: 11px; margin: 0 0 12px; line-height: 1.6; }
+    .help-line code { color: var(--green); }
+    .help-line strong { color: var(--text); font-weight: 700; }
 
-        .scene { flex: 1; display: none; min-height: 0; }
-        .scene[data-active] { display: flex; }
+    button.btn {
+      font-family: inherit; font-size: 11px; letter-spacing: 0.05em; text-transform: uppercase;
+      background: var(--bg-3); color: var(--text); border: 1px solid var(--line-strong); padding: 8px 14px; cursor: pointer; transition: all .12s;
+    }
+    @media (hover: hover) { button.btn:hover { background: var(--bg-2); border-color: var(--green-dim); color: var(--green); } }
+    button.btn.primary { background: var(--green-dim); color: var(--bg-0); border-color: var(--green); font-weight: 700; }
+    button.btn[aria-pressed="true"] { background: var(--green-dim); color: var(--bg-0); border-color: var(--green); }
+    .btn-row { display: flex; gap: 6px; flex-wrap: wrap; }
 
-        .stage {
-            flex: 1;
-            min-height: 0;
-            position: relative;
-            overflow: hidden;
-            background: #000;
-        }
+    .field { margin-bottom: 12px; }
+    .field label { display: flex; justify-content: space-between; font-size: 10px; letter-spacing: 0.08em; color: var(--text-faint); text-transform: uppercase; margin-bottom: 4px; }
+    .field input[type="range"] { width: 100%; accent-color: var(--green); }
+    .field select {
+      width: 100%; background: var(--bg-3); border: 1px solid var(--line-strong); color: var(--text);
+      font-family: inherit; font-size: 12px; padding: 6px 8px;
+    }
+    .field-value { color: var(--green); font-weight: 700; font-variant-numeric: tabular-nums; }
 
-        .stage.tiers { display: flex; gap: 1px; background: var(--line); }
+    .metrics { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+    .metric { background: var(--bg-2); border: 1px solid var(--line); padding: 8px 10px; }
+    .metric .k { font-size: 9px; letter-spacing: 0.12em; color: var(--text-faint); text-transform: uppercase; }
+    .metric .v { font-size: 15px; font-weight: 500; color: var(--text); font-variant-numeric: tabular-nums; margin-top: 2px; }
+    .metric .v.green { color: var(--green); }
+    .metric .v.cyan { color: var(--cyan); }
+    .metric .v.amber { color: var(--amber); }
+    .metric .v.magenta { color: var(--magenta); }
 
-        .tier-cell { flex: 1; position: relative; background: #000; }
+    .stage-overlay { position: absolute; pointer-events: none; color: var(--text-dim); font-size: 11px; letter-spacing: 0.05em; }
+    .stage-overlay.tl { top: 14px; left: 18px; }
+    .stage-overlay.tr { top: 14px; right: 18px; text-align: right; }
+    .stage-overlay.bl { bottom: 14px; left: 18px; }
+    .stage-overlay.br { bottom: 14px; right: 18px; text-align: right; }
+    .stage-overlay .label { font-size: 9px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--text-faint); }
+    .stage-overlay .big { display: block; color: var(--green); font-size: 20px; font-weight: 500; font-variant-numeric: tabular-nums; text-shadow: var(--glow-green); }
 
-        .tier-label {
-            position: absolute;
-            top: 0.75rem;
-            left: 0.75rem;
-            font-size: 0.6875rem;
-            letter-spacing: 0.1em;
-            color: var(--text);
-            background: rgba(0,0,0,0.6);
-            padding: 2px 8px;
-            border-radius: 2px;
-        }
+    .readout {
+      position: absolute; top: 14px; left: 50%; transform: translateX(-50%);
+      display: flex; align-items: center; gap: 10px;
+      background: rgba(13, 17, 23, 0.82); border: 1px solid var(--line-strong);
+      padding: 7px 12px; font-size: 11px; pointer-events: none;
+    }
+    .readout .sw { width: 26px; height: 26px; border-radius: 3px; border: 1px solid var(--line-strong); background: var(--sw, #000); }
+    .readout .hex { color: var(--text); font-weight: 700; letter-spacing: 0.04em; }
+    .readout .lch { color: var(--text-dim); }
 
-        canvas { display: block; width: 100%; height: 100%; }
-
-        .panel {
-            width: clamp(280px, 24rem, 340px);
-            border-left: 1px solid var(--line);
-            background: var(--bg-1);
-            display: flex;
-            flex-direction: column;
-            overflow-y: auto;
-        }
-
-        .panel-head {
-            padding: 1rem 1.25rem 0.5rem;
-            font-size: 0.625rem;
-            letter-spacing: 0.18em;
-            text-transform: uppercase;
-            color: var(--text-faint);
-            border-bottom: 1px solid var(--line);
-        }
-
-        section {
-            padding: 1.25rem;
-            border-bottom: 1px solid var(--line);
-        }
-
-        h3 {
-            margin: 0 0 0.875rem;
-            font-size: 0.625rem;
-            font-weight: 700;
-            letter-spacing: 0.16em;
-            text-transform: uppercase;
-            color: var(--cyan);
-        }
-
-        .btn-row { display: flex; gap: 0.5rem; flex-wrap: wrap; }
-
-        button.btn {
-            font-family: inherit;
-            font-size: 0.6875rem;
-            letter-spacing: 0.05em;
-            text-transform: uppercase;
-            background: var(--bg-3);
-            color: var(--text);
-            border: 1px solid var(--line-strong);
-            padding: 0.5rem 0.875rem;
-            cursor: pointer;
-            transition: color 0.12s ease, background 0.12s ease, border-color 0.12s ease;
-        }
-
-        @media (hover: hover) {
-            button.btn:hover {
-                background: var(--bg-2);
-                border-color: var(--green);
-                color: var(--green);
-            }
-            button.btn.primary:hover { filter: brightness(1.08); }
-        }
-
-        button.btn.primary {
-            background: var(--green);
-            color: var(--bg-0);
-            border-color: var(--green);
-            font-weight: 700;
-        }
-
-        .field { margin-bottom: 1rem; }
-        .field:last-child { margin-bottom: 0; }
-
-        .field label {
-            display: flex;
-            justify-content: space-between;
-            font-size: 0.625rem;
-            letter-spacing: 0.08em;
-            color: var(--text-faint);
-            text-transform: uppercase;
-            margin-bottom: 0.35rem;
-        }
-
-        .field-value { color: var(--green); font-weight: 700; }
-
-        input[type="range"] { width: 100%; accent-color: var(--green); }
-
-        .note { font-size: 0.75rem; color: var(--text-dim); line-height: 1.6; margin: 0; }
-        .note code {
-            color: var(--cyan);
-            background: var(--bg-3);
-            padding: 0 0.25rem;
-            border-radius: 2px;
-        }
-
-        footer.telemetry {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
-            border-top: 1px solid var(--line);
-            background: var(--bg-1);
-            font-size: 0.75rem;
-        }
-
-        .tele { padding: 0.625rem 1rem; border-right: 1px solid var(--line); }
-        .tele:last-child { border-right: 0; }
-
-        .tele .k {
-            font-size: 0.625rem;
-            letter-spacing: 0.14em;
-            text-transform: uppercase;
-            color: var(--text-faint);
-        }
-
-        .tele .v {
-            font-size: 1rem;
-            font-weight: 500;
-            font-variant-numeric: tabular-nums;
-            color: var(--text);
-        }
-
-        .tele .v.accent { color: var(--green); }
-
-        .legend { display: flex; gap: 1.25rem; font-size: 0.75rem; }
-        .legend .chip { display: flex; align-items: center; gap: 0.5rem; }
-
-        .swatch { width: 10px; height: 10px; border-radius: 50%; }
-        .swatch.s { background: var(--green); }
-        .swatch.c { background: var(--cyan); }
-    </style>
+    .swrow { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
+    .chip {
+      width: 34px; height: 22px; border-radius: 3px; border: 1px solid var(--line-strong);
+      background: var(--c, #000); cursor: pointer;
+    }
+    .c-green { color: var(--green); }
+    .c-cyan { color: var(--cyan); }
+    .legend { display: flex; gap: 14px; }
+    .lchip { display: flex; align-items: center; gap: 6px; font-size: 10px; color: var(--text-dim); }
+    .lswatch { width: 9px; height: 9px; border-radius: 2px; background: var(--sw, var(--green)); box-shadow: 0 0 8px var(--sw, var(--green)); }
+  </style>
 </head>
 <body>
 <div id="app">
-    <header>
-        <div class="brand"><span class="mark">&#9680;</span> lite-color-engine</div>
-        <div class="meta">v1.2.0 &middot; Zero-GC OKLCH &middot; P3 Ready</div>
-    </header>
+  <header class="top">
+    <div class="brand">
+      <span class="mark">◐</span>
+      <span class="pkg">@zakkster/lite-color-engine</span>
+      <span class="ver">v1.2.0</span>
+    </div>
+    <div class="tagline"><span class="dot"></span>oscilloscope · OKLCH color engine</div>
+  </header>
 
-    <nav class="tabs" id="tabs">
-        <button data-tab="live" aria-current="true">Live Gradient</button>
-        <button data-tab="tiers" aria-current="false">Accuracy Tiers</button>
-    </nav>
+  <nav class="tabs" id="tabs">
+    <button data-tab="grad" aria-current="true"><span class="scene-num">01</span>Gradient Lab</button>
+    <button data-tab="gamut"><span class="scene-num">02</span>Gamut Wheel</button>
+    <button data-tab="remap"><span class="scene-num">03</span>Palette Remap</button>
+  </nav>
 
-    <main>
-        <!-- LIVE GRADIENT SCENE -->
-        <section class="scene" data-scene="live" data-active>
-            <div class="stage">
-                <canvas id="live-canvas"></canvas>
-            </div>
-            <aside class="panel">
-                <div class="panel-head">Live Gradient</div>
-                <section>
-                    <h3>Playback</h3>
-                    <div class="btn-row">
-                        <button class="btn primary" id="btn-play" type="button">Pause</button>
-                        <button class="btn" id="btn-p3" type="button">Use Display P3</button>
-                    </div>
-                </section>
-                <section>
-                    <h3>Gradient</h3>
-                    <div class="field">
-                        <label>Stops <span class="field-value" id="stops-val">5</span></label>
-                        <input type="range" id="stops" min="2" max="8" value="5" step="1">
-                    </div>
-                    <div class="field">
-                        <label>Speed <span class="field-value" id="speed-val">1.2x</span></label>
-                        <input type="range" id="speed" min="0.3" max="3.5" step="0.1" value="1.2">
-                    </div>
-                </section>
-                <section>
-                    <h3>Pipeline</h3>
-                    <p class="note">
-                        Colors parsed once into a <code>Float32Array</code> OKLCH buffer, then
-                        interpolated and packed straight into <code>ImageData</code> every frame.
-                        No allocations on the hot path.
-                    </p>
-                </section>
-            </aside>
+  <main>
+    <!-- ─── SCENE 01 · GRADIENT LAB ─── -->
+    <section class="scene" data-scene="grad" data-active>
+      <div class="stage" id="grad-stage">
+        <canvas id="grad-canvas"></canvas>
+        <div class="stage-overlay tl"><span class="label">OKLCH · perceptual</span></div>
+        <div class="stage-overlay" id="grad-mid-label"><span class="label">sRGB · linear channel lerp</span></div>
+        <div class="stage-overlay bl"><span class="label">ΔE-OK per step&nbsp;&nbsp;<span class="c-green">▮ OKLCH</span>&nbsp;<span class="c-cyan">▮ sRGB</span></span></div>
+        <div class="readout" id="grad-readout">
+          <div class="sw" id="grad-sw"></div>
+          <div><span class="hex" id="grad-hex">#000000</span><br><span class="lch" id="grad-lch">L — C — H —</span></div>
+        </div>
+      </div>
+      <aside class="panel">
+        <div class="panel-head">scene 01 · perceptual gradients</div>
+        <section>
+          <p class="help-line">
+            The same stops interpolated two ways. <code>lerpOklchBuffer</code> +
+            <code>bakeGradientToUint32</code> stay <strong>vivid and evenly spaced</strong>;
+            naive sRGB channel-lerp dips through <strong>muddy midtones</strong>. The ribbon is
+            <code>deltaEOK</code> between adjacent samples — flat means perceptually uniform.
+          </p>
         </section>
-
-        <!-- ACCURACY TIERS SCENE -->
-        <section class="scene" data-scene="tiers">
-            <div class="stage tiers">
-                <div class="tier-cell">
-                    <canvas id="canvas-fast"></canvas>
-                    <div class="tier-label">FAST (sqrt approx)</div>
-                </div>
-                <div class="tier-cell">
-                    <canvas id="canvas-accurate"></canvas>
-                    <div class="tier-label">ACCURATE (clamp)</div>
-                </div>
-                <div class="tier-cell">
-                    <canvas id="canvas-gamut"></canvas>
-                    <div class="tier-label">GAMUT-MAPPED (MINDE)</div>
-                </div>
-            </div>
-            <aside class="panel">
-                <div class="panel-head">Accuracy Comparison</div>
-                <section>
-                    <p class="note">
-                        The same vivid OKLCH gradient packed three ways. FAST substitutes
-                        <code>sqrt</code> for the sRGB transfer (~10/255 midtone drift). ACCURATE
-                        uses the true transfer with a hard gamut clamp. GAMUT-MAPPED runs MINDE
-                        chroma reduction (from the <code>/gamut</code> subpath) to preserve hue
-                        near the gamut boundary.
-                    </p>
-                </section>
-            </aside>
+        <section>
+          <h3>Stops</h3>
+          <div class="field">
+            <label>preset</label>
+            <select id="grad-preset">
+              <option value="0">Blue → Gold (complementary)</option>
+              <option value="1" selected>Spectrum (blue·violet·orange·teal)</option>
+              <option value="2">Cyan → Red</option>
+              <option value="3">Sunset</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>easing</label>
+            <select id="grad-ease">
+              <option value="lin">linear</option>
+              <option value="smooth" selected>smoothstep</option>
+              <option value="io">ease-in-out</option>
+            </select>
+          </div>
         </section>
-    </main>
+        <section>
+          <h3>Uniformity</h3>
+          <div class="metrics">
+            <div class="metric"><div class="k">OKLCH max step</div><div class="v green" id="grad-omax">0</div></div>
+            <div class="metric"><div class="k">sRGB max step</div><div class="v cyan" id="grad-smax">0</div></div>
+            <div class="metric"><div class="k">sRGB spikier</div><div class="v magenta" id="grad-ratio">1×</div></div>
+            <div class="metric"><div class="k">lut entries</div><div class="v amber" id="grad-res">0</div></div>
+          </div>
+        </section>
+      </aside>
+    </section>
 
-    <footer class="telemetry">
-        <div class="tele"><span class="k">FPS</span><br><span class="v accent" id="t-fps">--</span></div>
-        <div class="tele"><span class="k">Mode</span><br><span class="v" id="t-mode">sRGB</span></div>
-        <div class="tele"><span class="k">Allocs / frame</span><br><span class="v accent" id="t-alloc">0</span></div>
-        <div class="tele"><span class="k">Status</span><br><span class="v accent" id="t-status">running</span></div>
-    </footer>
+    <!-- ─── SCENE 02 · GAMUT WHEEL ─── -->
+    <section class="scene" data-scene="gamut">
+      <div class="stage" id="gamut-stage">
+        <canvas id="gamut-canvas"></canvas>
+        <div class="stage-overlay tl"><span class="label">hard clamp</span></div>
+        <div class="stage-overlay tr"><span class="label">MINDE map</span></div>
+        <div class="stage-overlay br"><span class="label">◜ white ring = sRGB gamut boundary</span></div>
+      </div>
+      <aside class="panel">
+        <div class="panel-head">scene 02 · gamut mapping</div>
+        <section>
+          <p class="help-line">
+            A hue wheel at fixed lightness — radius is chroma. Beyond the sRGB boundary,
+            the <strong>left half</strong> hard-clamps channels (hue drifts); the
+            <strong>right half</strong> runs <code>gamutMapToSrgbBuffer</code> (MINDE), reducing
+            chroma at fixed L and H so the hue stays true.
+          </p>
+          <button class="btn primary" id="gamut-spin" aria-pressed="true">◐ sweep lightness</button>
+        </section>
+        <section>
+          <h3>Slice</h3>
+          <div class="field">
+            <label>lightness L <span class="field-value" id="gamut-l-v">0.72</span></label>
+            <input type="range" id="gamut-l" min="0.15" max="0.95" step="0.01" value="0.72">
+          </div>
+          <div class="field">
+            <label>max chroma <span class="field-value" id="gamut-c-v">0.37</span></label>
+            <input type="range" id="gamut-c" min="0.20" max="0.45" step="0.01" value="0.37">
+          </div>
+        </section>
+        <section>
+          <h3>Telemetry</h3>
+          <div class="metrics">
+            <div class="metric"><div class="k">out of gamut</div><div class="v magenta" id="gamut-oog">0%</div></div>
+            <div class="metric"><div class="k">fps</div><div class="v green" id="gamut-fps">60</div></div>
+          </div>
+        </section>
+      </aside>
+    </section>
+
+    <!-- ─── SCENE 03 · PALETTE REMAP ─── -->
+    <section class="scene" data-scene="remap">
+      <div class="stage" id="remap-stage">
+        <canvas id="remap-canvas"></canvas>
+        <div class="stage-overlay tl"><span class="label">source</span></div>
+        <div class="stage-overlay tr"><span class="label" id="remap-mode-label">remapped · shading preserved</span></div>
+      </div>
+      <aside class="panel">
+        <div class="panel-head">scene 03 · palette remap</div>
+        <section>
+          <p class="help-line">
+            <code>remapPixelsToPalette</code> finds each pixel's nearest palette color by
+            <code>deltaEOK</code> in OKLab. With <strong>preserve lightness</strong> it keeps the
+            source's shading and swaps only chroma — the recolor look under
+            <code>lite-hueforge</code>.
+          </p>
+          <button class="btn primary" id="remap-preserve" aria-pressed="true">preserve lightness</button>
+        </section>
+        <section>
+          <h3>Palette</h3>
+          <div class="field">
+            <label>preset</label>
+            <select id="remap-preset">
+              <option value="0" selected>Phosphor</option>
+              <option value="1">Ember</option>
+              <option value="2">Ice</option>
+              <option value="3">Viridian</option>
+            </select>
+          </div>
+          <div class="swrow" id="remap-chips"></div>
+        </section>
+        <section>
+          <h3>Telemetry</h3>
+          <div class="metrics">
+            <div class="metric"><div class="k">pixels / frame</div><div class="v cyan" id="remap-px">0</div></div>
+            <div class="metric"><div class="k">palette</div><div class="v green" id="remap-pal">0</div></div>
+            <div class="metric"><div class="k">mode</div><div class="v magenta" id="remap-mode">preserve</div></div>
+            <div class="metric"><div class="k">fps</div><div class="v amber" id="remap-fps">60</div></div>
+          </div>
+        </section>
+      </aside>
+    </section>
+  </main>
 </div>
 
 <script type="importmap">
 {
   "imports": {
-    "@zakkster/lite-lerp": "https://cdn.jsdelivr.net/npm/@zakkster/lite-lerp",
+    "@zakkster/lite-lerp": "https://esm.sh/@zakkster/lite-lerp@1.0.7",
     "@zakkster/lite-color-engine": "../index.js",
-    "@zakkster/lite-color-engine/gamut": "../src/Gamut.js"
+    "@zakkster/lite-color-engine/gamut": "../src/Gamut.js",
+    "@zakkster/lite-color-engine/remap": "../src/Remap.js"
   }
 }
 </script>
 
 <script type="module">
-    // ============================================================
-    // lite-color-engine v1.2 demo - dogfoods the published entry.
-    // Bare specifiers above resolve via the importmap; the engine's
-    // own `import '@zakkster/lite-lerp'` resolves to the CDN.
-    // ============================================================
-    import {
-        parseCSSColor,
-        lerpOklchBuffer,
-        packOklchBufferToUint32,
-        packOklchBufferToUint32Fast,
-        packOklchBufferToUint32P3
-    } from '@zakkster/lite-color-engine';
-    import { packOklchBufferToUint32MINDE } from '@zakkster/lite-color-engine/gamut';
+  import {
+    parseCSSColor, bakeGradientToUint32, sampleColorLUT,
+    packOklchBufferToUint32, lerpOklchBuffer, sRgbToOklchBuffer, deltaEOK,
+  } from "@zakkster/lite-color-engine";
+  import { gamutMapToSrgbBuffer, packOklchBufferToUint32MINDE } from "@zakkster/lite-color-engine/gamut";
+  import { remapPixelsToPalette } from "@zakkster/lite-color-engine/remap";
 
-    // ---- constants ----
-    const DPR = Math.min(2, window.devicePixelRatio || 1);
-    const MAX_DT = 1 / 30;         // clamp dt after tab-away so scroll never jumps
-    const SCROLL_RATE = 0.15;      // gradient scroll (cycles/second at 1x speed)
-    const FPS_WINDOW = 0.5;        // seconds between fps samples
+  const DPR = Math.min(2, window.devicePixelRatio || 1);
+  const $ = (id) => document.getElementById(id);
+  const clamp01 = (x) => (x < 0 ? 0 : x > 1 ? 1 : x);
+  const hexOf = (u) => "#" + ((u & 255) | 0).toString(16).padStart(2, "0")
+    + (((u >>> 8) & 255) | 0).toString(16).padStart(2, "0")
+    + (((u >>> 16) & 255) | 0).toString(16).padStart(2, "0");
 
-    // ---- teardown ----
+  // easing
+  const EASE = {
+    lin: (t) => t,
+    smooth: (t) => t * t * (3 - 2 * t),
+    io: (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2),
+  };
+
+  // A Canvas2D scene backed by an offscreen ImageData buffer, drawn scaled to fill.
+  function makeSurface(canvas) {
+    const ctx = canvas.getContext("2d");
+    const off = document.createElement("canvas");
+    const offCtx = off.getContext("2d");
+    let cssW = 1, cssH = 1, cache = null, cIW = 0, cIH = 0;
+    function resize() {
+      const r = canvas.getBoundingClientRect();
+      cssW = Math.max(1, Math.round(r.width));
+      cssH = Math.max(1, Math.round(r.height));
+      canvas.width = Math.floor(cssW * DPR);
+      canvas.height = Math.floor(cssH * DPR);
+      ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    }
+    return {
+      get w() { return cssW; }, get h() { return cssH; }, ctx, resize,
+      // Cached: only reallocates the ImageData when the internal size changes.
+      ensureBuffer(iw, ih) {
+        if (cache && cIW === iw && cIH === ih) return cache;
+        off.width = iw; off.height = ih; cIW = iw; cIH = ih;
+        const img = offCtx.createImageData(iw, ih);
+        cache = { img, u32: new Uint32Array(img.data.buffer) };
+        return cache;
+      },
+      blit(img, smooth) {
+        offCtx.putImageData(img, 0, 0);
+        ctx.imageSmoothingEnabled = !!smooth;
+        ctx.drawImage(off, 0, 0, cssW, cssH);
+      },
+    };
+  }
+
+  // ════════════════════ SCENE 01 · GRADIENT LAB ════════════════════════════
+  const grad = (() => {
+    const surf = makeSurface($("grad-canvas"));
+    const $preset = $("grad-preset"), $ease = $("grad-ease");
+    const $omax = $("grad-omax"), $smax = $("grad-smax"), $ratio = $("grad-ratio"), $res = $("grad-res");
+    const $sw = $("grad-sw"), $hex = $("grad-hex"), $lch = $("grad-lch"), $mid = $("grad-mid-label");
+
+    const PRESETS = [
+      ["#2f6bff", "#ffd23f"],
+      ["#3b5bff", "#d838ff", "#ff9e2c", "#29e0b0"],
+      ["#22d3ee", "#ef4444"],
+      ["#1e1b4b", "#7c3aed", "#f97316", "#fde047"],
+    ];
+    let W = 1, H = 1, iw = 1, ih = 1, buf = null, oklchRow = null, srgbRow = null;
+    const kf = new Float32Array(8 * 3);
+    const lchLut = new Float32Array(1);
+    let lchArr = new Float32Array(3), running = false, raf = 0, play = 0, dir = 1;
+    let fpsT = performance.now(), fpsN = 0, hudTick = 0;
+    let bandTop = 0, bandH = 0, gap = 0, srgbTop = 0, ribTop = 0, ribH = 0;
+
+    function rebuild() {
+      const css = PRESETS[+$preset.value];
+      const N = css.length;
+      for (let i = 0; i < N; i++) parseCSSColor(css[i], kf, i * 3);
+      const easeFn = EASE[$ease.value];
+
+      // layout inside the offscreen buffer
+      bandH = Math.floor(ih * 0.30); gap = Math.max(6, Math.floor(ih * 0.03));
+      bandTop = Math.floor(ih * 0.08);
+      srgbTop = bandTop + bandH + gap;
+      ribTop = srgbTop + bandH + gap + Math.floor(ih * 0.02);
+      ribH = Math.max(20, ih - ribTop - Math.floor(ih * 0.06));
+
+      const lut = bakeGradientToUint32(kf, N, iw, easeFn);
+      // per-x LCH (for delta + readout) and naive sRGB row
+      oklchRow = new Uint32Array(iw);
+      srgbRow = new Uint32Array(iw);
+      const lch = new Float32Array(iw * 3);
+      const stopRGBA = new Uint32Array(N);
+      for (let i = 0; i < N; i++) stopRGBA[i] = packOklchBufferToUint32(kf, i * 3);
+      for (let x = 0; x < iw; x++) {
+        const te = easeFn(x / (iw - 1)) * (N - 1);
+        const s = Math.min(N - 2, te | 0), f = te - s;
+        lerpOklchBuffer(kf, s * 3, kf, (s + 1) * 3, f, lch, x * 3);
+        oklchRow[x] = sampleColorLUT(lut, x / (iw - 1));
+        const a = stopRGBA[s], b = stopRGBA[s + 1];
+        const r = ((a & 255) + (((b & 255) - (a & 255)) * f)) | 0;
+        const g = (((a >>> 8) & 255) + ((((b >>> 8) & 255) - ((a >>> 8) & 255)) * f)) | 0;
+        const bl = (((a >>> 16) & 255) + ((((b >>> 16) & 255) - ((a >>> 16) & 255)) * f)) | 0;
+        srgbRow[x] = (0xff << 24) | (bl << 16) | (g << 8) | r;
+      }
+      lchArr = lch;
+
+      // delta ribbons
+      const oStep = new Float32Array(iw), sStep = new Float32Array(iw);
+      const sA = new Float32Array(3), sB = new Float32Array(3);
+      let oMax = 1e-6, sMax = 1e-6;
+      for (let x = 1; x < iw; x++) {
+        oStep[x] = deltaEOK(lch, x * 3, lch, (x - 1) * 3);
+        const a = srgbRow[x], b = srgbRow[x - 1];
+        sRgbToOklchBuffer(a & 255, (a >>> 8) & 255, (a >>> 16) & 255, sA, 0);
+        sRgbToOklchBuffer(b & 255, (b >>> 8) & 255, (b >>> 16) & 255, sB, 0);
+        sStep[x] = deltaEOK(sA, 0, sB, 0);
+        if (oStep[x] > oMax) oMax = oStep[x];
+        if (sStep[x] > sMax) sMax = sStep[x];
+      }
+
+      // paint offscreen buffer
+      const { img, u32 } = surf.ensureBuffer(iw, ih);
+      const BG = 0xff0d0907;
+      u32.fill(BG);
+      for (let x = 0; x < iw; x++) {
+        for (let y = bandTop; y < bandTop + bandH; y++) u32[y * iw + x] = oklchRow[x];
+        for (let y = srgbTop; y < srgbTop + bandH; y++) u32[y * iw + x] = srgbRow[x];
+        const scaleV = Math.max(oMax, sMax);
+        const hs = Math.min(ribH, (sStep[x] / scaleV) * ribH) | 0;
+        for (let y = 0; y < hs; y++) u32[(ribTop + ribH - 1 - y) * iw + x] = 0xff2bbbf0; // sRGB cyan
+        const ho = Math.min(ribH, (oStep[x] / scaleV) * ribH) | 0;
+        const yo = ribTop + ribH - 1 - ho;
+        u32[yo * iw + x] = 0xff76e35f; if (yo + 1 < ih) u32[(yo + 1) * iw + x] = 0xff76e35f; // OKLCH green
+      }
+      buf = img;
+
+      $omax.textContent = oMax.toFixed(4);
+      $smax.textContent = sMax.toFixed(4);
+      $ratio.textContent = (sMax / oMax).toFixed(1) + "×";
+      $res.textContent = iw;
+
+      // position the middle overlay label at the sRGB band
+      $mid.style.top = (100 * srgbTop / ih).toFixed(1) + "%";
+      $mid.style.left = "18px";
+    }
+
+    function draw() {
+      surf.blit(buf, true);
+      const ctx = surf.ctx, x = play * (W - 1);
+      // playhead
+      ctx.strokeStyle = "rgba(255,255,255,0.85)";
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(x + 0.5, H * (bandTop / ih)); ctx.lineTo(x + 0.5, H * ((srgbTop + bandH) / ih)); ctx.stroke();
+      // readout follows OKLCH gradient at playhead
+      const ix = Math.min(iw - 1, Math.max(0, (play * (iw - 1)) | 0));
+      const u = oklchRow[ix];
+      $sw.style.setProperty("--sw", hexOf(u));
+      $hex.textContent = hexOf(u).toUpperCase();
+      const b = ix * 3;
+      $lch.textContent = "L " + lchArr[b].toFixed(2) + "  C " + lchArr[b + 1].toFixed(2) + "  H " + Math.round(lchArr[b + 2]);
+    }
+
+    function frame() {
+      if (!running) return;
+      play += dir * 0.0032;
+      if (play >= 1) { play = 1; dir = -1; } else if (play <= 0) { play = 0; dir = 1; }
+      draw();
+      fpsN++; const now = performance.now();
+      if (now - fpsT >= 500) { fpsT = now; fpsN = 0; }
+      hudTick++;
+      raf = requestAnimationFrame(frame);
+    }
+
     const ac = new AbortController();
-    const sig = ac.signal;
+    $preset.addEventListener("change", rebuild, { signal: ac.signal });
+    $ease.addEventListener("change", rebuild, { signal: ac.signal });
 
-    // ---- cached DOM refs (all lookups happen once, here) ----
-    const $ = (id) => document.getElementById(id);
-    const $tabs = $('tabs');
-    const $scenes = document.querySelectorAll('.scene');
-    const $liveCanvas = $('live-canvas');
-    const $btnPlay = $('btn-play');
-    const $btnP3 = $('btn-p3');
-    const $stops = $('stops');
-    const $stopsVal = $('stops-val');
-    const $speed = $('speed');
-    const $speedVal = $('speed-val');
-    const $fast = $('canvas-fast');
-    const $accurate = $('canvas-accurate');
-    const $gamut = $('canvas-gamut');
-    const $tFps = $('t-fps');
-    const $tMode = $('t-mode');
-    const $tAlloc = $('t-alloc');
-    const $tStatus = $('t-status');
-
-    // ---- shared scratch (module-scope, never re-allocated) ----
-    const _lerp = new Float32Array(3);   // interpolation output
-    const _a = new Float32Array(3);      // gradient endpoint A (parsed once)
-    const _b = new Float32Array(3);      // gradient endpoint B (parsed once)
-    parseCSSColor('oklch(0.62 0.27 25)', _a, 0);    // vivid warm
-    parseCSSColor('oklch(0.66 0.26 265)', _b, 0);   // vivid cool
-
-    // Replicate row 0 down the whole buffer via exponential doubling (log2(h) memcpys).
-    const fillRowsDown = (u32, w, h) => {
-        let filled = 1;
-        while (filled < h) {
-            const n = filled < h - filled ? filled : h - filled;
-            u32.copyWithin(filled * w, 0, n * w);
-            filled += n;
-        }
+    function resize() { surf.resize(); W = surf.w; H = surf.h; iw = Math.min(1400, Math.max(2, Math.floor(W))); ih = Math.max(2, Math.floor(H)); rebuild(); }
+    return {
+      resize,
+      start() { if (running) return; running = true; raf = requestAnimationFrame(frame); },
+      stop() { running = false; if (raf) cancelAnimationFrame(raf); },
     };
+  })();
 
-    const surfaceOf = (canvas) => ({ canvas, ctx: null, img: null, u32: null, w: 0, h: 0 });
+  // ════════════════════ SCENE 02 · GAMUT WHEEL ═════════════════════════════
+  const gamut = (() => {
+    const surf = makeSurface($("gamut-canvas"));
+    const $l = $("gamut-l"), $lV = $("gamut-l-v"), $c = $("gamut-c"), $cV = $("gamut-c-v");
+    const $oog = $("gamut-oog"), $fps = $("gamut-fps"), $spin = $("gamut-spin");
 
-    // Size a canvas to its box in device pixels; (re)build the ImageData only
-    // when the pixel dimensions actually change. Returns false while hidden (0x0).
-    const sizeSurface = (s) => {
-        const rect = s.canvas.getBoundingClientRect();
-        const w = Math.max(0, Math.round(rect.width * DPR));
-        const h = Math.max(0, Math.round(rect.height * DPR));
-        if (w === 0 || h === 0) { s.w = 0; s.h = 0; return false; }
-        if (!s.ctx) s.ctx = s.canvas.getContext('2d', { alpha: false });
-        if (w !== s.w || h !== s.h) {
-            s.canvas.width = w;
-            s.canvas.height = h;
-            s.img = s.ctx.createImageData(w, h);
-            s.u32 = new Uint32Array(s.img.data.buffer);
-            s.w = w;
-            s.h = h;
+    let W = 1, H = 1, iw = 1, ih = 1, buf = null, u32 = null;
+    let L = 0.72, Cmax = 0.37, spin = true, lDir = 1, dirty = true;
+    let running = false, raf = 0, fpsT = performance.now(), fpsN = 0, hudTick = 0, oog = 0;
+    let recomputeAcc = 0;
+    const c1 = new Float32Array(3), c2 = new Float32Array(3);
+    let cx = 0, cy = 0, R = 1;
+    const boundary = new Float32Array(360 * 2); // px points
+
+    function rebuildWheel() {
+      const b = surf.ensureBuffer(iw, ih); buf = b.img; u32 = b.u32; u32.fill(0xff0d0907);
+      cx = iw / 2; cy = ih / 2; R = Math.min(iw, ih) * 0.46;
+      let out = 0, total = 0;
+      for (let y = 0; y < ih; y++) {
+        const dy = y - cy;
+        for (let x = 0; x < iw; x++) {
+          const dx = x - cx, r = Math.sqrt(dx * dx + dy * dy);
+          if (r > R) continue;
+          const Hh = (Math.atan2(dy, dx) * 57.29577951308232 + 360) % 360;
+          const C = (r / R) * Cmax;
+          c1[0] = L; c1[1] = C; c1[2] = Hh;
+          total++;
+          let u;
+          if (dx < 0) { u = packOklchBufferToUint32(c1, 0); }
+          else {
+            gamutMapToSrgbBuffer(c1, 0, c2, 0);
+            if (c2[1] < C - 1e-4) out++;
+            u = packOklchBufferToUint32MINDE(c1, 0);
+          }
+          u32[y * iw + x] = u;
         }
-        return true;
+      }
+      // boundary ring (bisection per degree)
+      for (let a = 0; a < 360; a++) {
+        const ang = a * 0.017453292519943295, Hh = a;
+        let lo = 0, hi = Cmax;
+        for (let it = 0; it < 20; it++) { const m = (lo + hi) / 2; c1[0] = L; c1[1] = m; c1[2] = Hh; gamutMapToSrgbBuffer(c1, 0, c2, 0); if (c2[1] < m - 1e-4) hi = m; else lo = m; }
+        const rr = (lo / Cmax) * R;
+        boundary[a * 2] = cx + Math.cos(ang) * rr;
+        boundary[a * 2 + 1] = cy + Math.sin(ang) * rr;
+      }
+      oog = total ? out / (total / 2) : 0;
+      dirty = false;
+    }
+
+    function draw() {
+      surf.blit(buf, true);
+      const ctx = surf.ctx, sx = W / iw, sy = H / ih;
+      // gamut boundary ring
+      ctx.strokeStyle = "rgba(255,255,255,0.9)"; ctx.lineWidth = 1.25; ctx.beginPath();
+      for (let a = 0; a <= 360; a++) { const i = (a % 360) * 2; const px = boundary[i] * sx, py = boundary[i + 1] * sy; if (a === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py); }
+      ctx.stroke();
+      // center split line
+      ctx.strokeStyle = "rgba(255,255,255,0.12)"; ctx.beginPath(); ctx.moveTo((cx * sx) + 0.5, cy * sy - R * sy); ctx.lineTo((cx * sx) + 0.5, cy * sy + R * sy); ctx.stroke();
+    }
+
+    function frame() {
+      if (!running) return;
+      if (spin) {
+        recomputeAcc += 1;
+        if (recomputeAcc >= 4) {   // ~15 Hz recompute while sweeping
+          recomputeAcc = 0;
+          L += lDir * 0.012;
+          if (L >= 0.95) { L = 0.95; lDir = -1; } else if (L <= 0.18) { L = 0.18; lDir = 1; }
+          $l.value = L.toFixed(2); $lV.textContent = L.toFixed(2);
+          dirty = true;
+        }
+      }
+      if (dirty) rebuildWheel();
+      draw();
+      fpsN++; const now = performance.now();
+      if (now - fpsT >= 500) { $fps.textContent = Math.round(fpsN * 1000 / (now - fpsT)); fpsT = now; fpsN = 0; }
+      if ((hudTick++ & 7) === 0) $oog.textContent = Math.round(oog * 100) + "%";
+      raf = requestAnimationFrame(frame);
+    }
+
+    const ac = new AbortController();
+    $l.addEventListener("input", () => { L = +$l.value; $lV.textContent = L.toFixed(2); dirty = true; }, { signal: ac.signal });
+    $c.addEventListener("input", () => { Cmax = +$c.value; $cV.textContent = Cmax.toFixed(2); dirty = true; }, { signal: ac.signal });
+    $spin.addEventListener("click", () => { spin = !spin; $spin.setAttribute("aria-pressed", spin ? "true" : "false"); }, { signal: ac.signal });
+
+    function resize() { surf.resize(); W = surf.w; H = surf.h; iw = Math.min(520, Math.max(2, Math.floor(W))); ih = Math.min(520, Math.max(2, Math.floor(H))); dirty = true; }
+    return {
+      resize,
+      start() { if (running) return; running = true; fpsT = performance.now(); fpsN = 0; raf = requestAnimationFrame(frame); },
+      stop() { running = false; if (raf) cancelAnimationFrame(raf); },
     };
+  })();
 
-    // ================= LIVE GRADIENT =================
-    const live = surfaceOf($liveCanvas);
-    let liveStops = new Float32Array(0);  // packed [L,C,H] triples
-    let liveStopCount = 0;
-    let liveUseP3 = false;
-    let livePlaying = true;
-    let liveTime = 0;
-    let liveSpeed = 1.2;
+  // ════════════════════ SCENE 03 · PALETTE REMAP ═══════════════════════════
+  const remap = (() => {
+    const surf = makeSurface($("remap-canvas"));
+    const $preserve = $("remap-preserve"), $preset = $("remap-preset"), $chips = $("remap-chips");
+    const $px = $("remap-px"), $pal = $("remap-pal"), $mode = $("remap-mode"), $fps = $("remap-fps");
+    const $modeLabel = $("remap-mode-label");
 
-    // Authoring-time allocation only (never on the hot path).
-    const setStops = (count) => {
-        liveStopCount = count;
-        liveStops = new Float32Array(count * 3);
-        for (let i = 0; i < count; i++) {
-            parseCSSColor(`oklch(0.65 0.22 ${(i / count) * 360})`, liveStops, i * 3);
-        }
+    const PALETTES = [
+      ["#0d1117", "#2b7a52", "#5fe39f", "#7dd3fc", "#e879a8"],
+      ["#0d0907", "#7c2d12", "#f59e0b", "#fca5a5", "#fde68a"],
+      ["#0b1220", "#1e3a8a", "#38bdf8", "#a5f3fc", "#e0f2fe"],
+      ["#08130d", "#166534", "#4ade80", "#a7f3d0", "#ecfccb"],
+    ];
+    let W = 1, H = 1, gw = 1, gh = 1, buf = null, u32 = null, src = null, out = null;
+    let palLch = new Float32Array(15), P = 5, preserve = true;
+    let running = false, raf = 0, fpsT = performance.now(), fpsN = 0, hudTick = 0, t0 = performance.now();
+    const balls = [[0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0]];
+
+    function loadPalette() {
+      const css = PALETTES[+$preset.value]; P = css.length;
+      palLch = new Float32Array(P * 3);
+      for (let i = 0; i < P; i++) parseCSSColor(css[i], palLch, i * 3);
+      $chips.replaceChildren();
+      for (const c of css) { const d = document.createElement("div"); d.className = "chip"; d.style.setProperty("--c", c); $chips.appendChild(d); }
+      $pal.textContent = P;
+    }
+
+    function alloc() {
+      const half = Math.floor(W / 2) - 10;
+      gw = Math.min(460, Math.max(2, half)); gh = Math.max(2, Math.floor(H));
+      const b = surf.ensureBuffer(gw * 2 + 20, gh); buf = b.img; u32 = b.u32; u32.fill(0xff0d0907);
+      src = new Uint8ClampedArray(gw * gh * 4);
+      out = new Uint32Array(gw * gh);
+    }
+
+    function frame() {
+      if (!running) return;
+      const now = performance.now(), t = (now - t0) * 0.0009;
+      // moving metaballs (shaded single-hue source)
+      balls[0][0] = gw * (0.30 + 0.16 * Math.sin(t)); balls[0][1] = gh * (0.40 + 0.22 * Math.cos(t * 0.9)); balls[0][2] = gh * 0.34;
+      balls[1][0] = gw * (0.68 + 0.14 * Math.cos(t * 1.1)); balls[1][1] = gh * (0.55 + 0.20 * Math.sin(t * 1.3)); balls[1][2] = gh * 0.40;
+      balls[2][0] = gw * (0.52 + 0.20 * Math.sin(t * 0.7 + 1)); balls[2][1] = gh * (0.30 + 0.16 * Math.cos(t * 0.6)); balls[2][2] = gh * 0.30;
+      balls[3][0] = gw * (0.40 + 0.18 * Math.cos(t * 1.4)); balls[3][1] = gh * (0.72 + 0.14 * Math.sin(t)); balls[3][2] = gh * 0.28;
+
+      for (let y = 0; y < gh; y++) for (let x = 0; x < gw; x++) {
+        let f = 0;
+        for (let k = 0; k < 4; k++) { const dx = x - balls[k][0], dy = y - balls[k][1], br = balls[k][2]; f += (br * br) / (dx * dx + dy * dy + 1); }
+        const v = f < 1 ? f : 1;
+        const p = (y * gw + x) * 4;
+        src[p] = (18 + v * 120) | 0; src[p + 1] = (58 + v * 180) | 0; src[p + 2] = (72 + v * 150) | 0; src[p + 3] = 255;
+      }
+      remapPixelsToPalette(src, palLch, out, gw * gh, P, { preserveLightness: preserve });
+
+      // compose source (left) | remapped (right)
+      const stride = gw * 2 + 20;
+      for (let y = 0; y < gh; y++) for (let x = 0; x < gw; x++) {
+        const sp = (y * gw + x) * 4;
+        u32[y * stride + x] = (0xff << 24) | (src[sp + 2] << 16) | (src[sp + 1] << 8) | src[sp];
+        u32[y * stride + gw + 20 + x] = out[y * gw + x];
+      }
+      surf.blit(buf, false);
+
+      fpsN++;
+      if (now - fpsT >= 500) { $fps.textContent = Math.round(fpsN * 1000 / (now - fpsT)); fpsT = now; fpsN = 0; }
+      if ((hudTick++ & 7) === 0) { $px.textContent = (gw * gh / 1000 | 0) + "K"; }
+      raf = requestAnimationFrame(frame);
+    }
+
+    const ac = new AbortController();
+    $preset.addEventListener("change", loadPalette, { signal: ac.signal });
+    $preserve.addEventListener("click", () => {
+      preserve = !preserve;
+      $preserve.setAttribute("aria-pressed", preserve ? "true" : "false");
+      $mode.textContent = preserve ? "preserve" : "flat";
+      $modeLabel.textContent = preserve ? "remapped · shading preserved" : "remapped · flat fill";
+    }, { signal: ac.signal });
+
+    function resize() { surf.resize(); W = surf.w; H = surf.h; alloc(); }
+    loadPalette();
+    return {
+      resize,
+      start() { if (running) return; running = true; t0 = performance.now(); fpsT = t0; fpsN = 0; raf = requestAnimationFrame(frame); },
+      stop() { running = false; if (raf) cancelAnimationFrame(raf); },
     };
+  })();
 
-    const renderLive = () => {
-        if (live.w === 0 || liveStopCount < 2) return;
-        const w = live.w, h = live.h, u32 = live.u32;
-        const packFn = liveUseP3 ? packOklchBufferToUint32P3 : packOklchBufferToUint32;
-        const n = liveStopCount;
-        const scroll = liveTime * SCROLL_RATE;
-        for (let x = 0; x < w; x++) {
-            const t = (x / w + scroll) % 1;
-            const seg = t * n;
-            const idx = seg | 0;
-            const ia = (idx % n) * 3;
-            const ib = ((idx + 1) % n) * 3;
-            lerpOklchBuffer(liveStops, ia, liveStops, ib, seg - idx, _lerp, 0);
-            u32[x] = packFn(_lerp, 0);
-        }
-        fillRowsDown(u32, w, h);
-        live.ctx.putImageData(live.img, 0, 0);
-    };
+  // ─── tabs ────────────────────────────────────────────────────────────────
+  const scenes = { grad, gamut, remap };
+  let current = "grad";
+  function activate(tab) {
+    if (tab === current) return;
+    scenes[current].stop();
+    current = tab;
+    for (const b of $("tabs").querySelectorAll("button")) b.setAttribute("aria-current", b.dataset.tab === tab ? "true" : "false");
+    for (const s of document.querySelectorAll(".scene")) { if (s.dataset.scene === tab) s.setAttribute("data-active", ""); else s.removeAttribute("data-active"); }
+    requestAnimationFrame(() => { scenes[tab].resize(); scenes[tab].start(); });
+  }
+  $("tabs").addEventListener("click", (e) => { const t = e.target.closest("button[data-tab]"); if (t) activate(t.dataset.tab); });
+  window.addEventListener("resize", () => scenes[current].resize());
+  window.addEventListener("pagehide", () => { grad.stop(); gamut.stop(); remap.stop(); });
 
-    // ================= ACCURACY TIERS =================
-    const tierFast = surfaceOf($fast);
-    const tierAccurate = surfaceOf($accurate);
-    const tierGamut = surfaceOf($gamut);
-
-    const renderTier = (s, packFn) => {
-        if (!sizeSurface(s)) return;         // skips while the scene is hidden (0x0)
-        const w = s.w, h = s.h, u32 = s.u32;
-        for (let x = 0; x < w; x++) {
-            lerpOklchBuffer(_a, 0, _b, 0, x / w, _lerp, 0);
-            u32[x] = packFn(_lerp, 0);
-        }
-        fillRowsDown(u32, w, h);
-        s.ctx.putImageData(s.img, 0, 0);
-    };
-
-    const renderTiers = () => {
-        renderTier(tierFast, packOklchBufferToUint32Fast);
-        renderTier(tierAccurate, packOklchBufferToUint32);
-        renderTier(tierGamut, packOklchBufferToUint32MINDE);
-    };
-
-    // ================= MASTER LOOP =================
-    let activeScene = 'live';
-    let rafId = 0;
-    let lastNow = 0;
-    let frames = 0;
-    let fpsAccum = 0;
-
-    const frame = (now) => {
-        const dt = lastNow ? Math.min((now - lastNow) / 1000, MAX_DT) : 0;
-        lastNow = now;
-
-        // fps sampling (throttled textContent write)
-        frames++;
-        fpsAccum += dt;
-        if (fpsAccum >= FPS_WINDOW) {
-            $tFps.textContent = Math.round(frames / fpsAccum);
-            frames = 0;
-            fpsAccum = 0;
-        }
-
-        if (activeScene === 'live' && livePlaying) {
-            liveTime += dt * liveSpeed;
-            renderLive();
-        }
-
-        rafId = requestAnimationFrame(frame);
-    };
-
-    // ================= RESIZE =================
-    // Fires on first observe and whenever a canvas resizes - including the
-    // 0 -> real transition when a hidden scene becomes visible. This is what
-    // makes the gradients appear without any manual resize.
-    const ro = new ResizeObserver(() => {
-        if (activeScene === 'live') {
-            sizeSurface(live);
-            if (!livePlaying) renderLive();   // keep the static frame correct while paused
-        } else {
-            renderTiers();
-        }
-    });
-    ro.observe($liveCanvas);
-    ro.observe($fast);
-    ro.observe($accurate);
-    ro.observe($gamut);
-
-    // ================= SCENE SWITCHING =================
-    const switchScene = (name) => {
-        activeScene = name;
-        for (const s of $scenes) {
-            if (s.dataset.scene === name) s.setAttribute('data-active', '');
-            else s.removeAttribute('data-active');
-        }
-        for (const btn of $tabs.children) {
-            btn.setAttribute('aria-current', btn.dataset.tab === name ? 'true' : 'false');
-        }
-        // Scene is now visible, so its canvases have a real box - render immediately.
-        if (name === 'live') { sizeSurface(live); renderLive(); }
-        else renderTiers();
-    };
-
-    // ================= EVENTS (all abortable) =================
-    $tabs.addEventListener('click', (e) => {
-        const btn = e.target.closest('button[data-tab]');
-        if (btn) switchScene(btn.dataset.tab);
-    }, { signal: sig });
-
-    $stops.addEventListener('input', () => {
-        const count = +$stops.value;
-        $stopsVal.textContent = count;
-        setStops(count);
-        if (!livePlaying) renderLive();
-    }, { signal: sig });
-
-    $speed.addEventListener('input', () => {
-        liveSpeed = +$speed.value;
-        $speedVal.textContent = liveSpeed.toFixed(1) + 'x';
-    }, { signal: sig });
-
-    $btnPlay.addEventListener('click', () => {
-        livePlaying = !livePlaying;
-        $btnPlay.textContent = livePlaying ? 'Pause' : 'Play';
-        $tStatus.textContent = livePlaying ? 'running' : 'paused';
-    }, { signal: sig });
-
-    $btnP3.addEventListener('click', () => {
-        liveUseP3 = !liveUseP3;
-        $btnP3.textContent = liveUseP3 ? 'Use sRGB' : 'Use Display P3';
-        $tMode.textContent = liveUseP3 ? 'Display P3' : 'sRGB';
-        if (!livePlaying) renderLive();
-    }, { signal: sig });
-
-    // ================= DISPOSE =================
-    const dispose = () => {
-        cancelAnimationFrame(rafId);
-        ro.disconnect();
-        ac.abort();   // detaches every listener registered with { signal: sig }
-    };
-    window.addEventListener('pagehide', dispose, { signal: sig });
-
-    // ================= BOOT =================
-    // Hook initial UI state from the live controls rather than hardcoding it.
-    liveSpeed = +$speed.value;
-    $stopsVal.textContent = $stops.value;
-    $speedVal.textContent = liveSpeed.toFixed(1) + 'x';
-    $btnPlay.textContent = livePlaying ? 'Pause' : 'Play';
-    $tAlloc.textContent = '0';
-    setStops(+$stops.value);
-    sizeSurface(live);
-    rafId = requestAnimationFrame(frame);
+  requestAnimationFrame(() => { grad.resize(); grad.start(); });
 </script>
 </body>
 </html>
