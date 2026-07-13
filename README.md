@@ -8,7 +8,6 @@
 [![npm bundle size](https://img.shields.io/bundlephobia/minzip/@zakkster/lite-color-engine?style=for-the-badge)](https://bundlephobia.com/result?p=@zakkster/lite-color-engine)
 [![npm downloads](https://img.shields.io/npm/dm/@zakkster/lite-color-engine?style=for-the-badge&color=blue)](https://www.npmjs.com/package/@zakkster/lite-color-engine)
 [![npm total downloads](https://img.shields.io/npm/dt/@zakkster/lite-color-engine?style=for-the-badge&color=blue)](https://www.npmjs.com/package/@zakkster/lite-color-engine)
-[![Coverage Status](https://coveralls.io/repos/github/PeshoVurtoleta/lite-color-engine/badge.svg?branch=master)](https://coveralls.io/github/PeshoVurtoleta/lite-color-engine?branch=master)
 ![Tree-Shakeable](https://img.shields.io/badge/tree--shakeable-yes-brightgreen)
 ![TypeScript](https://img.shields.io/badge/TypeScript-Types-informational)
 ![Dependencies](https://img.shields.io/badge/dependencies-0-brightgreen)
