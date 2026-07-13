@@ -232,6 +232,28 @@ export function packOklchBufferToUint32Fast(
 ): number;
 
 /**
+ * Dithered sibling of {@link packOklchBufferToUint32}. Applies a threshold-
+ * offset dither in gamma-encoded space with a caller-supplied `noise01` value,
+ * shared across R/G/B so the dither is a luminance pattern (no chroma speckle).
+ * Alpha is undithered.
+ *
+ * Parity: `noise01 === 0.5` reproduces the byte output of the plain packer
+ * exactly (asserted by the test suite).
+ *
+ * `noise01` is expected in `[0, 1)`. When driven from the shared blue-noise
+ * tile, use `getBlueNoise64()[((y & 63) << 6) | (x & 63)] / 256`, which stays
+ * strictly below 1 and gives a low-discrepancy sample.
+ *
+ * @returns 32-bit unsigned integer in little-endian RGBA byte order.
+ */
+export function packOklchBufferToUint32Dithered(
+    buf: Float32Array,
+    offset: number,
+    alpha?: number,
+    noise01?: number
+): number;
+
+/**
  * Batch packer: n OKLCH triplets -> n Uint32 packed colors (stride 1 in dst).
  * Opt-in 4k sRGB LUT (`useLut=true`) for fast-packer throughput at near-exact accuracy.
  */
@@ -243,6 +265,30 @@ export function packOklchBufferToUint32IntoN(
     n: number,
     alpha?: number,
     useLut?: boolean
+): void;
+
+/**
+ * Dithered batch packer: walks a 64x64 blue-noise tile in row-major order and
+ * applies a per-pixel luminance-patterned threshold dither (same noise value
+ * across R/G/B; alpha undithered). The tile is torus-indexed
+ * (`tile[((y & 63) << 6) | (x & 63)]`) so any `x0`/`y0`/`rowWidth` combination
+ * is safe. Zero allocations; no modulo/division in the hot loop.
+ *
+ * The 4k sRGB transfer LUT is *not* an option here — that LUT stores rounded
+ * bytes and would silently degrade the dither to plain rounding. A companion
+ * float LUT restoring this axis is a v1.6 candidate.
+ */
+export function packOklchBufferToUint32IntoNDithered(
+    src: Float32Array,
+    offSrc: number,
+    dst: Uint32Array,
+    offDst: number,
+    n: number,
+    alpha: number,
+    noiseTile: Uint8Array,
+    x0: number,
+    y0: number,
+    rowWidth: number
 ): void;
 
 /**
@@ -279,6 +325,37 @@ export function packOklchBufferToUint32P3Fast(
 ): number;
 
 /**
+ * Batch sibling of {@link packOklchBufferToUint32P3}. Packs `n` OKLCH triplets
+ * (stride 3) into `n` Uint32 pixels encoded for Display P3. `useLut=true`
+ * shares the 4k sRGB transfer LUT (the P3 transfer function is IEC 61966-2-1,
+ * identical to sRGB — no separate table is allocated), giving fast-packer
+ * throughput at within ~1 LSB of the exact encoder.
+ */
+export function packOklchBufferToUint32P3IntoN(
+    src: Float32Array,
+    offSrc: number,
+    dst: Uint32Array,
+    offDst: number,
+    n: number,
+    alpha?: number,
+    useLut?: boolean
+): void;
+
+/**
+ * Returns the shared 64x64 blue-noise tile as a `Uint8Array(4096)`, lazily
+ * decoded from an inlined base64 blob on first call and reused thereafter.
+ *
+ * Index a pixel via `tile[((y & 63) << 6) | (x & 63)]`. The tile is
+ * torus-tileable: repeating it end-to-end on either axis is spectrally
+ * seamless. Each byte 0..255 appears exactly 16 times (uniform histogram),
+ * so `byte / 256` gives a low-discrepancy sample in `[0, 1)`.
+ *
+ * The returned reference is shared and must not be mutated; callers that
+ * need to modify the values should copy first.
+ */
+export function getBlueNoise64(): Uint8Array;
+
+/**
  * Zero-GC sampler for a baked LUT. Inline `t`-clamp + bitwise-truncated index.
  *
  * @param lut LUT produced by {@link bakeGradientToUint32}.
@@ -300,10 +377,17 @@ export type OklchPackerFn = (buf: Float32Array, offset: number, alpha?: number) 
  * Output bytes are little-endian RGBA - drop into a `Uint32Array` view of
  * `Canvas ImageData`, or upload as `RGBA / UNSIGNED_BYTE` via `texImage2D`.
  *
- * Stops are evenly distributed: stop _i_ is at `i / (numStops - 1)`. The
- * optional `easeFn` warps the parametric position **before** stop selection.
- * Easing outputs outside `[0, 1]` are clamped (the LUT is fixed-resolution
- * and cannot represent overshoot).
+ * **Open mode** (default): stops are evenly distributed — stop _i_ at
+ * `i / (numStops - 1)`; LUT sample _j_ at `j / (resolution - 1)`. Sample 0
+ * lands on stop 0, sample `resolution-1` on the last stop. Overshoot from
+ * `easeFn` is clamped to `[0, 1]`.
+ *
+ * **Closed mode** (`opts.closed = true`, new in v1.5): stops are treated
+ * cyclically — the wrap segment runs from `stops[numStops-1]` back to
+ * `stops[0]`. Sample _j_ is at `j / resolution` (period spacing, no duplicated
+ * endpoint). `easeFn` outputs are wrapped via `t - floor(t)` instead of
+ * clamped. Pair with `sampleColorLUTWrapped` on the consumer side (hue wheels,
+ * cyclic colorways).
  *
  * @param keyframesBuf Contiguous buffer of `[L0, C0, H0, L1, C1, H1, ...]`.
  * @param numStops Stop count; must be `>= 2`.
@@ -312,6 +396,7 @@ export type OklchPackerFn = (buf: Float32Array, offset: number, alpha?: number) 
  * @param packer Optional packer override. Defaults to the accurate
  *               {@link packOklchBufferToUint32}. Pass
  *               {@link packOklchBufferToUint32Fast} for ~2x bake throughput.
+ * @param opts Optional bake options. `{ closed: true }` bakes a cyclic LUT.
  * @throws If `numStops < 2` or `resolution < 2`.
  */
 export function bakeGradientToUint32(
@@ -319,7 +404,8 @@ export function bakeGradientToUint32(
     numStops: number,
     resolution?: number,
     easeFn?: (t: number) => number,
-    packer?: OklchPackerFn
+    packer?: OklchPackerFn,
+    opts?: { closed?: boolean }
 ): Uint32Array;
 
 // ============================================================================

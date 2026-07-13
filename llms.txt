@@ -1,4 +1,4 @@
-# lite-color-engine - LLM Reference (v1.4)
+# lite-color-engine - LLM Reference (v1.5)
 
 ## Core Exports
 
@@ -12,27 +12,54 @@
 
 ### Conversion
 - `sRgbToOklchBuffer(r, g, b, out, off)`
-- `displayP3ToOklchBuffer(r, g, b, out, off)` — New in v1.2
+- `displayP3ToOklchBuffer(r, g, b, out, off)`
 - `oklchToLinearP3(L, C, H, out)` — Inverse for P3 packing
 
 ### Runtime (Hot Path - Zero GC)
 - `lerpOklchBuffer(...)`
 - `packOklchBufferToUint32(buf, off, alpha?)` - Accurate sRGB
 - `packOklchBufferToUint32Fast(...)` - Fast approx
+- `packOklchBufferToUint32Dithered(buf, off, alpha?, noise01?)` — defaults `alpha=1.0, noise01=0.5`, so a 2-arg call is exactly `packOklchBufferToUint32` — **v1.5** dithered sRGB packer.
+  Luminance-only threshold dither (same `noise01` across R/G/B, no chroma speckle).
+  `noise01 = 0.5` reproduces the plain packer exactly.
 - `packOklchBufferToUint32P3(buf, off, alpha?)` - Accurate P3 output
 - `packOklchBufferToUint32P3Fast(...)` - Fast P3 output
 - `sampleColorLUT(lut, t)` - O(1) lookup into a baked gradient LUT
 
 ### Batch kernels (v1.3, for 100k+ particle systems)
 - `lerpOklchBufferN(a, offA, b, offB, t, out, offOut, n)` - bulk lerp n triplets (stride 3), bit-exact to n scalar calls.
-- `packOklchBufferToUint32IntoN(src, offSrc, dst, offDst, n, alpha?, useLut?)` - bulk pack n OKLCH -> Uint32 (dst stride 1). `useLut=true` uses the 4k transfer LUT (~4.4x throughput vs accurate, within 1 LSB; Fast-packer speed at near-exact accuracy).
-- Note: the batch win comes from `useLut`, not from call-amortization (accurate batch ~= scalar loop in V8; pow-bound).
+- `packOklchBufferToUint32IntoN(src, offSrc, dst, offDst, n, alpha?, useLut?)` - bulk pack n OKLCH -> Uint32 (dst stride 1). `useLut=true` uses the 4k transfer LUT (~4.4x throughput vs accurate, within 1 LSB).
+- `packOklchBufferToUint32P3IntoN(src, offSrc, dst, offDst, n, alpha?, useLut?)` — **v1.5** P3 batch. `useLut=true` reuses the same `SRGB_LUT` (identical transfer function per IEC 61966-2-1); no separate table is allocated.
+- `packOklchBufferToUint32IntoNDithered(src, offSrc, dst, offDst, n, alpha, noiseTile, x0, y0, rowWidth)` — **v1.5** dithered batch. Walks a 64x64 blue-noise tile in row-major order over destination `(x0, y0)` with `rowWidth`. Zero allocations, no modulo in hot loop. Exact-encoder only (see note below).
+- Note: the batch win comes from `useLut`, not from call-amortization (accurate batch ~= scalar loop in V8; pow-bound). The dithered batch has no `useLut` axis — `SRGB_LUT` stores rounded bytes, which would collapse the dither threshold; a float LUT restoring this is a v1.6 candidate.
+
+### Blue-noise tile (v1.5)
+- `getBlueNoise64()` — Returns the shared 64x64 blue-noise tile as `Uint8Array(4096)`.
+  Lazily decoded from an inlined base64 blob on first call (sub-ms), then shared. Void-and-cluster,
+  histogram exactly uniform (16x each byte). Index via `tile[((y & 63) << 6) | (x & 63)]`.
+  Do not mutate the returned reference. Torus-tileable on both axes.
+- The tile is gated on SPECTRAL properties, not just its SHA-256 fingerprint
+  (`test/bluenoise-spectral.test.js`): minority-phase clumpiness < 0.70 across thresholds
+  16..240, that curve symmetric about T=128, radial power for r<=4 below the white-noise
+  floor of 1/12, high-band power above it, wrap edges as decorrelated as the interior.
+  A uniform histogram does NOT imply blue noise — a linear ramp has a perfectly uniform
+  histogram. The 1.5.0 release candidate shipped a tile that passed every histogram /
+  fingerprint / banding gate and was still 7x over-clustered above mid-gray (inverted
+  Phase 3 selector in the generator). Do not treat the fingerprint as the gate.
 
 ### Gamut mapping (subpath: `@zakkster/lite-color-engine/gamut`, NOT hot-path)
-- `packOklchBufferToUint32MINDE(buf, off, alpha?)` — MINDE chroma-reduction gamut map. ~30x slower than the core packer; use at LUT-build/authoring time.
+- `gamutMapToSrgbBuffer(inBuf, off, outBuf, offOut)` — MINDE chroma-reduction gamut map (scalar).
+- `gamutMapToSrgbBufferN(inBuf, off, outBuf, offOut, n)` — **v1.5** batch MINDE. Bit-for-bit identical to n scalar calls; for authoring / LUT-build bulk mapping.
+- `packOklchBufferToUint32MINDE(buf, off, alpha?)` — MINDE + pack. ~30x slower than the core packer; LUT-build/authoring time only.
 
-### LUT
-- `bakeGradientToUint32(..., packer?)` — Accepts any of the above packers
+### LUT (Gradient Baking)
+- `bakeGradientToUint32(keyframesBuf, numStops, resolution?, easeFn?, packer?, opts?)` — accepts any of the above packers.
+  - **v1.5:** trailing `opts` object. `{ closed: true }` bakes a cyclic LUT: sample positions `i / resolution` (period, no duplicated endpoint), wrap segment last->first, ease outputs period-wrapped via `t - floor(t)`. Pair with `sampleColorLUTWrapped` on the consumer side (hue wheels, cyclic colorways).
+  - Open mode (default) is byte-identical to v1.4.
+
+## Session Gate (v1.5)
+
+- `npm run preflight` — mandatory before feature work. Fetches the published tarball via `npm pack` and hash-compares against HEAD. Hard-fails on code drift (`index.js`, `index.d.ts`, `src/**`, `package.json`); warns for doc drift.
 
 ## Key Principles
 - All hot-path functions are allocation-free

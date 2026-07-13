@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>lite-color-engine v1.3 - oscilloscope</title>
+  <title>lite-color-engine v1.5 - oscilloscope</title>
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
   <style>
@@ -170,7 +170,7 @@
     <div class="brand">
       <span class="mark">&#9680;</span>
       <span class="pkg">@zakkster/lite-color-engine</span>
-      <span class="ver">v1.4.0</span>
+      <span class="ver">v1.5.0</span>
     </div>
     <div class="tagline"><span class="dot"></span>oscilloscope &middot; zero-GC OKLCH</div>
   </header>
@@ -179,6 +179,8 @@
     <button data-tab="field" aria-current="true"><span class="scene-num">01</span>Particle Field</button>
     <button data-tab="batch" aria-current="false"><span class="scene-num">02</span>Batch Kernels</button>
     <button data-tab="tiers" aria-current="false"><span class="scene-num">03</span>Accuracy Tiers</button>
+    <button data-tab="dither" aria-current="false"><span class="scene-num">04</span>Blue-Noise Dither</button>
+    <button data-tab="ring" aria-current="false"><span class="scene-num">05</span>Closed Bake</button>
   </nav>
 
   <main>
@@ -281,6 +283,7 @@
         <div class="tier-cell"><canvas id="tier-fast"></canvas><div class="tier-label">FAST (sqrt)</div></div>
         <div class="tier-cell"><canvas id="tier-acc"></canvas><div class="tier-label">ACCURATE (clamp)</div></div>
         <div class="tier-cell"><canvas id="tier-minde"></canvas><div class="tier-label">GAMUT (MINDE)</div></div>
+        <div class="tier-cell"><canvas id="tier-p3"></canvas><div class="tier-label">P3 BATCH (v1.5)</div></div>
       </div>
       <aside class="panel">
         <div class="panel-head">Accuracy Tiers</div>
@@ -290,6 +293,127 @@
             <code>sqrt</code> for the transfer (~10/255 drift). <strong>ACCURATE</strong> uses the
             true transfer with a hard clamp. <strong>GAMUT</strong> runs MINDE chroma reduction
             from the <code>/gamut</code> subpath to hold hue near the boundary.
+          </p>
+          <p class="help-line">
+            <strong>P3</strong> is v1.5's <code>packOklchBufferToUint32P3IntoN</code> writing into a
+            <code>display-p3</code> canvas -- one batch call for the whole row. The colorSpace is fixed
+            at <code>getContext()</code> time, which is why this is its own cell rather than a toggle.
+          </p>
+          <p class="note" id="tier-p3-note">--</p>
+        </section>
+      </aside>
+    </section>
+
+    <!-- SCENE 04 - BLUE-NOISE DITHER -->
+    <section class="scene" data-scene="dither">
+      <div class="stage split">
+        <div class="tier-cell"><canvas id="dither-off"></canvas><div class="tier-label">UNDITHERED</div></div>
+        <div class="tier-cell"><canvas id="dither-on"></canvas><div class="tier-label">BLUE-NOISE DITHER</div></div>
+      </div>
+      <aside class="panel">
+        <div class="panel-head">Blue-Noise Dither (v1.5)</div>
+        <section>
+          <p class="help-line">
+            A <strong>shallow</strong> lightness ramp -- the case 8-bit output cannot represent.
+            Left is <code>packOklchBufferToUint32IntoN</code>: the encoder rounds, and the ramp
+            collapses into hard stair-steps. Right is <code>packOklchBufferToUint32IntoNDithered</code>,
+            walking the shared 64x64 tile from <code>getBlueNoise64()</code>. Same bytes available,
+            same buffer, no allocations -- the error is just scattered instead of accumulated.
+          </p>
+          <p class="help-line">
+            Push <strong>base L</strong> into the highlights (0.85+) and shrink <strong>delta L</strong>.
+            That is the regime the v1.5.0 release candidate got wrong.
+          </p>
+        </section>
+        <section>
+          <h3>Ramp</h3>
+          <div class="field">
+            <label>Base lightness <span class="field-value" id="dither-l0-v">0.86</span></label>
+            <input type="range" id="dither-l0" min="0.15" max="0.95" step="0.01" value="0.86">
+          </div>
+          <div class="field">
+            <label>Delta L across width <span class="field-value" id="dither-dl-v">0.030</span></label>
+            <input type="range" id="dither-dl" min="0.004" max="0.100" step="0.002" value="0.030">
+          </div>
+          <div class="field">
+            <label>Hue <span class="field-value" id="dither-hue-v">250</span></label>
+            <input type="range" id="dither-hue" min="0" max="360" step="1" value="250">
+          </div>
+        </section>
+        <section>
+          <h3>Telemetry</h3>
+          <div class="metrics">
+            <div class="metric"><div class="k">Distinct bytes</div><div class="v amber" id="dither-uniq-off">--</div></div>
+            <div class="metric"><div class="k">Distinct bytes</div><div class="v green" id="dither-uniq-on">--</div></div>
+            <div class="metric"><div class="k">Mean run (flat)</div><div class="v amber" id="dither-run-off">--</div></div>
+            <div class="metric"><div class="k">Mean run (dith)</div><div class="v green" id="dither-run-on">--</div></div>
+            <div class="metric"><div class="k">Pack / frame</div><div class="v cyan" id="dither-ms">--</div></div>
+            <div class="metric"><div class="k">Rows packed</div><div class="v" id="dither-rows">--</div></div>
+          </div>
+          <p class="note mt-m">
+            "Mean run" is the average length of an identical-pixel run along one scanline.
+            A visible band <em>is</em> a long run. The dithered side should sit near 1.
+          </p>
+          <p class="note mt-s">
+            <strong>Gap:</strong> this pane is sRGB only. v1.5 ships a P3 batch and a dithered
+            batch, but no <em>dithered P3</em> batch -- <code>packOklchBufferToUint32P3IntoNDithered</code>
+            does not exist. Wide-gamut surfaces band too. Candidate for v1.6.
+          </p>
+        </section>
+      </aside>
+    </section>
+
+    <!-- SCENE 05 - CLOSED BAKE -->
+    <section class="scene" data-scene="ring">
+      <div class="stage split">
+        <div class="tier-cell"><canvas id="ring-open"></canvas><div class="tier-label">OPEN BAKE (default)</div></div>
+        <div class="tier-cell"><canvas id="ring-closed"></canvas><div class="tier-label">CLOSED BAKE (v1.5)</div></div>
+      </div>
+      <aside class="panel">
+        <div class="panel-head">Cyclic LUT Bake (v1.5)</div>
+        <section>
+          <p class="help-line">
+            The same hue-wheel stops baked twice and mapped around a ring. <strong>Open</strong> mode
+            spreads the stops over <code>[0, 1]</code> and stops at the last one -- so where the ring
+            closes, the LUT jumps straight back to stop 0. <strong>Closed</strong> mode
+            (<code>{ closed: true }</code>) adds the wrap segment last-to-first and spaces samples at
+            <code>i / resolution</code>, so there is no duplicated endpoint and no seam.
+          </p>
+          <p class="help-line">
+            The vivid stops are pulled into sRGB first with one
+            <code>gamutMapToSrgbBufferN</code> call over the whole keyframe buffer.
+          </p>
+        </section>
+        <section>
+          <h3>Wheel</h3>
+          <div class="field">
+            <label>Stops <span class="field-value" id="ring-stops-v">6</span></label>
+            <input type="range" id="ring-stops" min="3" max="9" step="1" value="6">
+          </div>
+          <div class="field">
+            <label>Chroma <span class="field-value" id="ring-chroma-v">0.20</span></label>
+            <input type="range" id="ring-chroma" min="0.04" max="0.34" step="0.01" value="0.20">
+          </div>
+          <div class="btn-row mt-m">
+            <button class="btn" id="ring-ease" type="button" aria-pressed="false">Ease: off</button>
+          </div>
+          <p class="note mt-s">
+            The ease is <code>t + 0.35</code> -- deliberate overshoot past 1. Open mode
+            <em>clamps</em> it (the tail flattens into a solid arc); closed mode
+            <em>period-wraps</em> it, which just rotates the wheel.
+          </p>
+        </section>
+        <section>
+          <h3>Seam</h3>
+          <div class="metrics">
+            <div class="metric"><div class="k">Open seam</div><div class="v amber" id="ring-seam-open">--</div></div>
+            <div class="metric"><div class="k">Closed seam</div><div class="v green" id="ring-seam-closed">--</div></div>
+            <div class="metric"><div class="k">Interior max</div><div class="v" id="ring-interior">--</div></div>
+            <div class="metric"><div class="k">Resolution</div><div class="v cyan" id="ring-res">--</div></div>
+          </div>
+          <p class="note mt-m">
+            Seam = max per-channel byte delta between <code>lut[res-1]</code> and <code>lut[0]</code>.
+            The gate: closed-mode seam must not exceed the largest interior step.
           </p>
         </section>
       </aside>
@@ -320,10 +444,13 @@
         packOklchBufferToUint32,
         packOklchBufferToUint32Fast,
         packOklchBufferToUint32IntoN,
+        packOklchBufferToUint32IntoNDithered,
+        packOklchBufferToUint32P3IntoN,
+        getBlueNoise64,
         formatOklchCss,
         formatHex
     } from '@zakkster/lite-color-engine';
-    import { packOklchBufferToUint32MINDE } from '@zakkster/lite-color-engine/gamut';
+    import { packOklchBufferToUint32MINDE, gamutMapToSrgbBufferN } from '@zakkster/lite-color-engine/gamut';
 
     // ---- constants ----
     const TAU = Math.PI * 2;
@@ -343,6 +470,33 @@
     const $tierFastEl = $('tier-fast');
     const $tierAccEl = $('tier-acc');
     const $tierMindeEl = $('tier-minde');
+    const $tierP3El = $('tier-p3');
+    const $tierP3Note = $('tier-p3-note');
+    const $dOffEl = $('dither-off');
+    const $dOnEl = $('dither-on');
+    const $dL0 = $('dither-l0');
+    const $dL0V = $('dither-l0-v');
+    const $dDL = $('dither-dl');
+    const $dDLV = $('dither-dl-v');
+    const $dHue = $('dither-hue');
+    const $dHueV = $('dither-hue-v');
+    const $dUniqOff = $('dither-uniq-off');
+    const $dUniqOn = $('dither-uniq-on');
+    const $dRunOff = $('dither-run-off');
+    const $dRunOn = $('dither-run-on');
+    const $dMsEl = $('dither-ms');
+    const $dRows = $('dither-rows');
+    const $rOpenEl = $('ring-open');
+    const $rClosedEl = $('ring-closed');
+    const $rStops = $('ring-stops');
+    const $rStopsV = $('ring-stops-v');
+    const $rChroma = $('ring-chroma');
+    const $rChromaV = $('ring-chroma-v');
+    const $rEase = $('ring-ease');
+    const $rSeamOpen = $('ring-seam-open');
+    const $rSeamClosed = $('ring-seam-closed');
+    const $rInterior = $('ring-interior');
+    const $rResEl = $('ring-res');
 
     // Authored endpoint colors, hoisted and parsed once at module init (zero per-frame work).
     // Tiers scene: a single vivid warm -> cool sweep.
@@ -516,7 +670,16 @@
             pY[i] += pVy[i];
             pLife[i]++;
 
-            if (pLife[i] >= pMax[i] || pX[i] < 0 || pX[i] >= w || pY[i] < 0 || pY[i] >= h) {
+            // Cull guard, written as !(in range) rather than (out of range) on purpose.
+            // The two forms are identical for every finite value and cost the same four
+            // compares -- but NaN makes EVERY comparison false, so the (out of range)
+            // form lets a NaN coordinate straight through to the plot below, where
+            // `NaN | 0` is 0 and the particle silently paints pixel (0, 0) forever.
+            // The !(in range) form respawns it instead. (Nothing here can produce a NaN
+            // today -- the `+ 1` in d2 rules out the divide-by-zero, and F_DAMP keeps
+            // the integration bounded -- so this is a guard against a future edit to
+            // the force math, at zero cost.)
+            if (pLife[i] >= pMax[i] || !(pX[i] >= 0 && pX[i] < w && pY[i] >= 0 && pY[i] < h)) {
                 fSpawn(i);
                 recycled++;
             }
@@ -684,11 +847,228 @@
         fillRowsDown(u32, w, h);
         s.ctx.putImageData(s.img, 0, 0);
     };
+    // The P3 cell is its own canvas because a 2D context's colorSpace is fixed at
+    // getContext() time and cannot be re-tagged afterwards. It is also the one cell
+    // that packs with a BATCH call (v1.5) rather than a scalar packer per pixel.
+    const tierP3 = surfaceOf($tierP3El);
+    const TIER_W_MAX = 4096;
+    const tP3Src = new Float32Array(TIER_W_MAX * 3);
+    const tP3Row = new Uint32Array(TIER_W_MAX);
+    let tP3Ok = false;
+
+    const sizeSurfaceP3 = (s) => {
+        const rect = s.canvas.getBoundingClientRect();
+        const w = Math.max(0, Math.round(rect.width * DPR));
+        const h = Math.max(0, Math.round(rect.height * DPR));
+        if (w === 0 || h === 0) { s.w = 0; s.h = 0; return false; }
+        if (!s.ctx) {
+            s.ctx = s.canvas.getContext('2d', { alpha: false, colorSpace: tP3Ok ? 'display-p3' : 'srgb' });
+        }
+        if (w !== s.w || h !== s.h) {
+            s.canvas.width = w; s.canvas.height = h;
+            s.img = tP3Ok
+                ? s.ctx.createImageData(w, h, { colorSpace: 'display-p3' })
+                : s.ctx.createImageData(w, h);
+            s.u32 = new Uint32Array(s.img.data.buffer);
+            s.w = w; s.h = h;
+        }
+        return true;
+    };
+
+    const renderTierP3 = () => {
+        if (!sizeSurfaceP3(tierP3)) return;
+        const w = tierP3.w, h = tierP3.h;
+        if (w > TIER_W_MAX) return;
+        for (let x = 0; x < w; x++) lerpOklchBuffer(_ta, 0, _tb, 0, x / w, tP3Src, x * 3);
+        // v1.5: one batch call for the entire row, encoded for Display P3.
+        packOklchBufferToUint32P3IntoN(tP3Src, 0, tP3Row, 0, w, 1, false);
+        tierP3.u32.set(tP3Row.subarray(0, w), 0);
+        fillRowsDown(tierP3.u32, w, h);
+        tierP3.ctx.putImageData(tierP3.img, 0, 0);
+    };
+
     const tiersRender = () => {
         renderTier(tierFast, packOklchBufferToUint32Fast);
         renderTier(tierAcc, packOklchBufferToUint32);
         renderTier(tierMinde, packOklchBufferToUint32MINDE);
+        renderTierP3();
     };
+
+    // ============================================================
+    // SCENE 04 - BLUE-NOISE DITHER
+    // ============================================================
+    // A shallow ramp is the pathological case for 8-bit output: neighbouring
+    // columns round to the same byte, and the ramp collapses into stair-steps.
+    // Dither does not add precision -- it scatters the rounding error so the eye
+    // integrates it back into the gradient instead of seeing an edge.
+    const D_W_MAX = 4096;
+    const NOISE = getBlueNoise64();       // shared 4096-byte tile, decoded once, never mutated
+    const dSrc = new Float32Array(D_W_MAX * 3);
+    const dRow = new Uint32Array(D_W_MAX);
+    const dSeen = new Uint8Array(256);    // scratch for the distinct-byte count
+    const dOffSurf = surfaceOf($dOffEl);
+    const dOnSurf = surfaceOf($dOnEl);
+    let dL0 = 0.86, dDL = 0.03, dHue = 250;
+
+    // Green channel of a packed pixel -- a good stand-in for luminance on a
+    // near-neutral ramp, and it is where the banding actually shows.
+    const dGreenOf = (px) => (px >> 8) & 255;
+
+    // Mean length of an identical-pixel run along one scanline. A visible band IS
+    // a long run; the whole point of the dither is to drive this toward 1.
+    const dMeanRun = (u32, off, w) => {
+        if (w <= 0) return 0;
+        let runs = 1;
+        for (let x = 1; x < w; x++) {
+            if (dGreenOf(u32[off + x]) !== dGreenOf(u32[off + x - 1])) runs++;
+        }
+        return w / runs;
+    };
+
+    const dDistinct = (u32, off, w) => {
+        dSeen.fill(0);
+        let n = 0;
+        for (let x = 0; x < w; x++) {
+            const g = dGreenOf(u32[off + x]);
+            if (dSeen[g] === 0) { dSeen[g] = 1; n++; }
+        }
+        return n;
+    };
+
+    const dRender = () => {
+        if (!sizeSurface(dOffSurf) || !sizeSurface(dOnSurf)) return;
+        const w = dOffSurf.w, h = dOffSurf.h;
+        if (w === 0 || w > D_W_MAX) return;
+
+        // Author the ramp once; both panes read the SAME source buffer.
+        const span = w > 1 ? w - 1 : 1;
+        for (let x = 0; x < w; x++) {
+            const o = x * 3;
+            let L = dL0 + dDL * (x / span);
+            if (L > 1) L = 1;
+            dSrc[o] = L;
+            dSrc[o + 1] = 0.035;
+            dSrc[o + 2] = dHue;
+        }
+
+        const t0 = performance.now();
+
+        // LEFT: one plain batch pack, row 0 replicated down. Every row is byte-identical,
+        // which is precisely why the bands read as hard vertical edges.
+        packOklchBufferToUint32IntoN(dSrc, 0, dRow, 0, w, 1, false);
+        dOffSurf.u32.set(dRow.subarray(0, w), 0);
+        fillRowsDown(dOffSurf.u32, w, h);
+
+        // RIGHT: same source, packed row by row so the tile advances in y.
+        // (x0=0, y0=y, rowWidth=w) indexes the tile at the DESTINATION position, so
+        // the noise stays locked to the screen rather than to the batch. Zero allocations.
+        const on = dOnSurf.u32;
+        for (let y = 0; y < h; y++) {
+            packOklchBufferToUint32IntoNDithered(dSrc, 0, on, y * w, w, 1, NOISE, 0, y, w);
+        }
+
+        const ms = performance.now() - t0;
+
+        dOffSurf.ctx.putImageData(dOffSurf.img, 0, 0);
+        dOnSurf.ctx.putImageData(dOnSurf.img, 0, 0);
+
+        // Static scene: telemetry is computed on the render, not per frame.
+        $dUniqOff.textContent = dDistinct(dOffSurf.u32, 0, w);
+        $dUniqOn.textContent = dDistinct(on, 0, w);
+        $dRunOff.textContent = dMeanRun(dOffSurf.u32, 0, w).toFixed(1) + ' px';
+        $dRunOn.textContent = dMeanRun(on, 0, w).toFixed(1) + ' px';
+        $dMsEl.textContent = ms.toFixed(1) + ' ms';
+        $dRows.textContent = h;
+    };
+
+    // ============================================================
+    // SCENE 05 - CLOSED BAKE (cyclic LUT)
+    // ============================================================
+    // Open mode spreads N stops over [0, 1] and terminates on the last one, so a
+    // ring built from it snaps back to stop 0 at the closing angle. Closed mode adds
+    // the wrap segment (last -> first) and samples at i/resolution, so the endpoint
+    // is never duplicated and the wheel is continuous.
+    const R_RES = 1024;
+    const R_STOPS_MAX = 9;
+    const rKf = new Float32Array(R_STOPS_MAX * 3);     // authored, possibly out of gamut
+    const rKfMapped = new Float32Array(R_STOPS_MAX * 3); // after batch MINDE
+    const rOpenSurf = surfaceOf($rOpenEl);
+    const rClosedSurf = surfaceOf($rClosedEl);
+    let rStops = 6, rChroma = 0.2, rEaseOn = false;
+    let rLutOpen = null, rLutClosed = null;
+
+    // Deliberate overshoot: this ease leaves [0, 1]. Open mode CLAMPS it (the tail
+    // flattens into a solid arc); closed mode period-wraps it (the wheel just rotates).
+    const rEaseFn = (t) => t + 0.35;
+
+    const rMaxChannelDelta = (a, b) => {
+        const dr = Math.abs((a & 255) - (b & 255));
+        const dg = Math.abs(((a >> 8) & 255) - ((b >> 8) & 255));
+        const db = Math.abs(((a >> 16) & 255) - ((b >> 16) & 255));
+        return Math.max(dr, dg, db);
+    };
+
+    const rBake = () => {
+        // Author an evenly-spaced hue wheel at the requested chroma. At high chroma
+        // these stops are outside sRGB, so pull the WHOLE keyframe buffer into gamut
+        // with a single v1.5 batch MINDE call rather than looping the scalar.
+        for (let i = 0; i < rStops; i++) {
+            const o = i * 3;
+            rKf[o] = 0.68;
+            rKf[o + 1] = rChroma;
+            rKf[o + 2] = (360 / rStops) * i;
+        }
+        gamutMapToSrgbBufferN(rKf, 0, rKfMapped, 0, rStops);
+
+        const ease = rEaseOn ? rEaseFn : undefined;
+        rLutOpen = bakeGradientToUint32(rKfMapped, rStops, R_RES, ease, undefined);
+        rLutClosed = bakeGradientToUint32(rKfMapped, rStops, R_RES, ease, undefined, { closed: true });
+
+        // The gate, live: the closed seam must not exceed the largest interior step.
+        let interior = 0;
+        for (let i = 1; i < R_RES; i++) {
+            const d = rMaxChannelDelta(rLutClosed[i], rLutClosed[i - 1]);
+            if (d > interior) interior = d;
+        }
+        $rSeamOpen.textContent = rMaxChannelDelta(rLutOpen[R_RES - 1], rLutOpen[0]);
+        $rSeamClosed.textContent = rMaxChannelDelta(rLutClosed[R_RES - 1], rLutClosed[0]);
+        $rInterior.textContent = interior;
+        $rResEl.textContent = R_RES;
+    };
+
+    const rRenderRing = (s, lut) => {
+        if (!sizeSurface(s)) return;
+        const w = s.w, h = s.h, u32 = s.u32;
+        const cx = w * 0.5, cy = h * 0.5;
+        const outer = Math.min(w, h) * 0.42;
+        const inner = outer * 0.55;
+        const outer2 = outer * outer, inner2 = inner * inner;
+        const INV_TAU = 1 / TAU;
+        for (let y = 0; y < h; y++) {
+            const dy = y - cy;
+            const rowOff = y * w;
+            for (let x = 0; x < w; x++) {
+                const dx = x - cx;
+                const d2 = dx * dx + dy * dy;
+                if (d2 > outer2 || d2 < inner2) { u32[rowOff + x] = 0xff000000; continue; }
+                // atan2 -> [-PI, PI] -> t in [0, 1). The seam sits at angle 0 (3 o'clock).
+                let t = Math.atan2(dy, dx) * INV_TAU;
+                if (t < 0) t += 1;
+                let i = (t * R_RES) | 0;
+                if (i >= R_RES) i = R_RES - 1;
+                u32[rowOff + x] = lut[i];
+            }
+        }
+        s.ctx.putImageData(s.img, 0, 0);
+    };
+
+    const rRender = () => {
+        if (rLutOpen === null) rBake();
+        rRenderRing(rOpenSurf, rLutOpen);
+        rRenderRing(rClosedSurf, rLutClosed);
+    };
+
+    const rRebake = () => { rBake(); rRender(); };
 
     // ============================================================
     // SHELL: scene registry, master loop, tabs, resize, dispose
@@ -696,7 +1076,9 @@
     const scenes = {
         field: { enter: () => { fResize(); fReseed(); paintLutStrip(); }, resize: fResize, frame: (dt) => { if (fStarted && fPlaying) fRender(dt); } },
         batch: { enter: bResize, resize: bResize, frame: bRender },
-        tiers: { enter: tiersRender, resize: tiersRender, frame: null }
+        tiers: { enter: tiersRender, resize: tiersRender, frame: null },
+        dither: { enter: dRender, resize: dRender, frame: null },
+        ring: { enter: rRender, resize: rRender, frame: null }
     };
     let active = 'field';
     let rafId = 0, lastNow = 0;
@@ -728,6 +1110,11 @@
     ro.observe($tierFastEl);
     ro.observe($tierAccEl);
     ro.observe($tierMindeEl);
+    ro.observe($tierP3El);
+    ro.observe($dOffEl);
+    ro.observe($dOnEl);
+    ro.observe($rOpenEl);
+    ro.observe($rClosedEl);
 
     // ---- events (all abortable) ----
     // Event choice: <button> and tab controls use `click` on purpose - it fires on
@@ -776,15 +1163,72 @@
     }, { signal: sig });
     $bSpeed.addEventListener('input', () => { bSpeed = +$bSpeed.value; $bSpeedV.textContent = bSpeed.toFixed(1) + 'x'; }, { signal: sig });
 
+    // dither controls -- static scene, so each input re-renders directly
+    $dL0.addEventListener('input', () => {
+        dL0 = +$dL0.value;
+        $dL0V.textContent = dL0.toFixed(2);
+        dRender();
+    }, { signal: sig });
+    $dDL.addEventListener('input', () => {
+        dDL = +$dDL.value;
+        $dDLV.textContent = dDL.toFixed(3);
+        dRender();
+    }, { signal: sig });
+    $dHue.addEventListener('input', () => {
+        dHue = +$dHue.value;
+        $dHueV.textContent = dHue | 0;
+        dRender();
+    }, { signal: sig });
+
+    // closed-bake controls -- rebake the LUTs, then repaint both rings
+    $rStops.addEventListener('input', () => {
+        rStops = +$rStops.value;
+        $rStopsV.textContent = rStops;
+        rRebake();
+    }, { signal: sig });
+    $rChroma.addEventListener('input', () => {
+        rChroma = +$rChroma.value;
+        $rChromaV.textContent = rChroma.toFixed(2);
+        rRebake();
+    }, { signal: sig });
+    $rEase.addEventListener('click', () => {
+        rEaseOn = !rEaseOn;
+        $rEase.setAttribute('aria-pressed', String(rEaseOn));
+        $rEase.textContent = rEaseOn ? 'Ease: t + 0.35' : 'Ease: off';
+        rRebake();
+    }, { signal: sig });
+
     // ---- dispose ----
     const dispose = () => { cancelAnimationFrame(rafId); ro.disconnect(); ac.abort(); };
     window.addEventListener('pagehide', dispose, { signal: sig });
 
     // ---- boot ----
+    // Every initial UI value is read back OUT of the control, never duplicated in JS.
     $fSwirlV.textContent = (+$fSwirl.value).toFixed(2);
     $bSpeedV.textContent = (+$bSpeed.value).toFixed(1) + 'x';
     fSwirl = +$fSwirl.value;
     bSpeed = +$bSpeed.value;
+
+    dL0 = +$dL0.value;
+    dDL = +$dDL.value;
+    dHue = +$dHue.value;
+    $dL0V.textContent = dL0.toFixed(2);
+    $dDLV.textContent = dDL.toFixed(3);
+    $dHueV.textContent = dHue | 0;
+
+    rStops = +$rStops.value;
+    rChroma = +$rChroma.value;
+    $rStopsV.textContent = rStops;
+    $rChromaV.textContent = rChroma.toFixed(2);
+
+    // Probe Display P3 support once. If the browser cannot give us a P3 2D context,
+    // say so rather than quietly rendering sRGB under a "P3" label.
+    const _p3Probe = document.createElement('canvas').getContext('2d', { colorSpace: 'display-p3' });
+    tP3Ok = !!_p3Probe && typeof _p3Probe.getContextAttributes === 'function'
+        && _p3Probe.getContextAttributes().colorSpace === 'display-p3';
+    $tierP3Note.textContent = tP3Ok
+        ? 'Canvas is display-p3. On an sRGB display this cell will look identical to ACCURATE -- that is correct, not a bug.'
+        : 'This browser gave no display-p3 2D context; the P3 cell falls back to sRGB.';
     fSetGradient(0);
     scenes.field.enter();
     rafId = requestAnimationFrame(frame);

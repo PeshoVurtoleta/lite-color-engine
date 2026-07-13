@@ -190,6 +190,39 @@ export function gamutMapToSrgbBuffer(inBuf, inOffset, outBuf, outOffset) {
 
 
 // -----------------------------------------------------------------------------
+// gamutMapToSrgbBufferN
+// -----------------------------------------------------------------------------
+
+/**
+ * Batch sibling of {@link gamutMapToSrgbBuffer}. Maps `n` OKLCH triplets
+ * (stride 3) from `inBuf` into `outBuf` at the equivalent stride, using the
+ * same CSS Color 4 MINDE bisection as the scalar path. Bit-for-bit identical
+ * to calling {@link gamutMapToSrgbBuffer} `n` times; the batch exists to
+ * amortize call overhead when authoring / LUT-building large color runs
+ * (hueforge P3 exporters, studio bake paths) that today loop the scalar.
+ *
+ * MINDE is ~30x slower than the core packer and stays out of the per-frame
+ * hot path — this batch is a setup-time / bake-time convenience. Zero
+ * allocations (reuses the module-level scratch). In-place is safe when
+ * `inBuf === outBuf` at aligned offsets: each iteration reads its three
+ * source lanes into `_rgb`/`_clipLch` scratch before writing back.
+ *
+ * @param {Float32Array} inBuf - Source OKLCH buffer (stride 3)
+ * @param {number} inOffset - Base offset of the first triplet in inBuf
+ * @param {Float32Array} outBuf - Destination OKLCH buffer (stride 3)
+ * @param {number} outOffset - Base offset of the first triplet in outBuf
+ * @param {number} n - Number of triplets to map (n <= 0 is a no-op)
+ * @returns {void}
+ */
+export function gamutMapToSrgbBufferN(inBuf, inOffset, outBuf, outOffset, n) {
+    if (n <= 0) return;
+    for (let i = 0; i < n; i++) {
+        gamutMapToSrgbBuffer(inBuf, inOffset + i * 3, outBuf, outOffset + i * 3);
+    }
+}
+
+
+// -----------------------------------------------------------------------------
 // packOklchBufferToUint32MINDE
 // -----------------------------------------------------------------------------
 

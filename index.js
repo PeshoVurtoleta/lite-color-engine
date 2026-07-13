@@ -17,10 +17,14 @@ export {
     lerpOklchBufferN,
     packOklchBufferToUint32,
     packOklchBufferToUint32Fast,
+    packOklchBufferToUint32Dithered,
     packOklchBufferToUint32IntoN,
+    packOklchBufferToUint32IntoNDithered,
     packOklchBufferToUint32P3,
     packOklchBufferToUint32P3Fast,
-    sampleColorLUT
+    packOklchBufferToUint32P3IntoN,
+    sampleColorLUT,
+    getBlueNoise64
 } from './src/runtime.js';
 
 export {

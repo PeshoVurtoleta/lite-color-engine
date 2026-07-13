@@ -20,6 +20,24 @@ export function gamutMapToSrgbBuffer(
 ): void;
 
 /**
+ * Batch sibling of `gamutMapToSrgbBuffer`. Maps `n` OKLCH triplets (stride 3)
+ * from `inBuf` into `outBuf` at the equivalent stride, using the same CSS
+ * Color 4 MINDE bisection. Bit-for-bit identical to `n` scalar calls; the
+ * batch exists to amortize call overhead for authoring / LUT-building large
+ * color runs (hueforge P3 exporters, studio bake paths).
+ *
+ * Setup-time / bake-time convenience — MINDE stays out of the per-frame hot
+ * path (~30x slower than the core packer). Zero allocations.
+ */
+export function gamutMapToSrgbBufferN(
+    inBuf: Float32Array,
+    inOffset: number,
+    outBuf: Float32Array,
+    outOffset: number,
+    n: number
+): void;
+
+/**
  * Accurate sibling of `packOklchBufferToUint32`. Runs MINDE gamut mapping
  * before packing, eliminating the hue-shift artifacts of the hard channel
  * clamp near the sRGB gamut boundary.

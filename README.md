@@ -215,6 +215,34 @@ Absolute milliseconds vary by device; the benchmark prints your machine's number
 
 ---
 
+## New in v1.5
+
+Three additions that make the engine the ecosystem's shared color kernel for `lite-gradient-studio` v1.2 and `lite-hueforge` v1.5:
+
+**Blue-noise dither kernels.** `getBlueNoise64()` returns a shared 64x64 void-and-cluster tile as a `Uint8Array(4096)`, decoded on first call from an inlined base64 blob and reused thereafter (histogram is exactly uniform: each byte 0..255 appears 16 times; torus-tileable). `packOklchBufferToUint32Dithered(buf, off, alpha = 1.0, noise01 = 0.5)` and its batch sibling `packOklchBufferToUint32IntoNDithered(..., noiseTile, x0, y0, rowWidth)` apply a threshold-offset dither in gamma-encoded space, shared across R/G/B — luminance-only, no chroma speckle. Parity: `noise01 === 0.5` reproduces the plain packer bit-for-bit. Zero allocations after the one-time noise decode.
+
+```js
+import { getBlueNoise64, packOklchBufferToUint32IntoNDithered } from "@zakkster/lite-color-engine";
+
+const tile = getBlueNoise64();
+// Pack a full row of the destination raster, walking the tile in row-major order:
+packOklchBufferToUint32IntoNDithered(oklchBuf, 0, pxOut, y * W, W, 1.0, tile, 0, y, W);
+```
+
+**Cyclic LUT bake.** `bakeGradientToUint32` gained a trailing `opts` argument: `{ closed: true }` bakes a period-spaced LUT (samples at `i / resolution`, no duplicated endpoint) where the last stop wraps back to the first. Pair with `sampleColorLUTWrapped` (in `@zakkster/lite-color-lerp` v1.1) for hue wheels and cyclic colorways. Open-mode calls are byte-identical to v1.4.
+
+**P3 and MINDE batch parity.** `packOklchBufferToUint32P3IntoN` closes the last gap in the batch-kernel family — same shape as the sRGB batch, and `useLut=true` reuses the existing `SRGB_LUT` (the P3 transfer function is IEC 61966-2-1, identical to sRGB), so there is no second table to allocate. `gamutMapToSrgbBufferN` (on the `/gamut` subpath) batches MINDE for bulk authoring / LUT-build workloads that today loop the scalar.
+
+**Preflight (`npm run preflight`).** Fetches the latest published tarball via `npm pack` and hash-compares against the working tree. Hard-fails on drift in code (`index.js`, `index.d.ts`, `src/**`, `package.json`); warns for doc drift only. Run it before starting feature work — this is the structural cure for the stale-base regressions that hit v1.3 and v1.4.
+
+**The tile is gated on its spectrum, not its fingerprint.** `test/bluenoise-spectral.test.js` asserts what "blue noise" actually means: minority-phase clumpiness stays under 0.70 across thresholds 16..240, that curve is symmetric about T=128, radial power for `r <= 4` sits below the white-noise floor of 1/12, high-band power sits above it, and the wrap edges are as decorrelated as the interior. A uniform histogram does **not** imply blue noise — a linear ramp has a perfectly uniform histogram. The v1.5.0 release candidate shipped a tile that passed every histogram, fingerprint and banding gate and was still 7x over-clustered above mid-gray; the SHA-256 assertion was pinning the defect rather than catching it. The generator now runs the same sweep as a hard gate and refuses to emit a tile that fails it.
+
+**Known gap.** There is no dithered *P3* batch — `packOklchBufferToUint32P3IntoNDithered` does not exist in v1.5. Wide-gamut surfaces band too; it is a v1.6 candidate alongside the float LUT.
+
+See CHANGELOG for the honest-notes edition, including why the dithered batch does not accept `useLut` (short version: the LUT stores pre-rounded bytes; dither needs sub-integer encoded values — a float LUT that restores this axis is a v1.6 candidate), and the deferred `-1/512` LSB dither DC bias.
+
+---
+
 ## API reference
 
 ### Parsing
@@ -432,7 +460,7 @@ function render() {
 }
 ```
 
-(A full oscilloscope-themed demo with this scene ships in `demo/index.html` -- run `npx serve .` from the package root.)
+(A full oscilloscope-themed demo ships in `demo/index.html` -- run `npx serve .` from the package root. Five scenes: particle field, batch kernels, accuracy tiers + the v1.5 P3 batch on a `display-p3` canvas, blue-noise dither on a shallow highlight ramp, and the open-vs-closed cyclic bake shown as a hue ring with its seam measured live.)
 
 ---
 

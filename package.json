@@ -1,6 +1,6 @@
 {
   "name": "@zakkster/lite-color-engine",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "author": "Zahary Shinikchiev <shinikchiev@yahoo.com>",
   "description": "Zero-GC, data-oriented OKLCH color engine and WebGL/Canvas buffer pipeline.",
   "type": "module",
@@ -60,13 +60,14 @@
   ],
   "scripts": {
     "test": "vitest run",
-    "bench": "node bench/benchmark.mjs"
+    "bench": "node bench/benchmark.mjs",
+    "preflight": "node tools/preflight.mjs"
   },
   "dependencies": {
     "@zakkster/lite-lerp": "^1.0.0"
   },
   "devDependencies": {
-    "vitest": "^1.0.0"
+    "vitest": "^4.1.10"
   },
   "license": "MIT",
   "homepage": "https://github.com/PeshoVurtoleta/lite-color-engine#readme",
