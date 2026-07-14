@@ -1,0 +1,1230 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="scope">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>lite-color-engine · 256 conversions, one million particles</title>
+
+<!-- Colour-vision-deficiency simulation. Identical matrices to Hueforge.app, and
+     identical `color-interpolation-filters="linearRGB"` — the Brettel/Viénot
+     matrices are defined on linear light, not on gamma-encoded values. The browser
+     runs this as one GPU compositing pass over the finished canvas, so it costs the
+     same at 20K segments and at 1,000,000 particles. -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <filter id="cvd-deuteranopia" color-interpolation-filters="linearRGB">
+    <feColorMatrix type="matrix" values="0.625 0.375 0 0 0  0.7 0.3 0 0 0  0 0.3 0.7 0 0  0 0 0 1 0"/>
+  </filter>
+  <filter id="cvd-protanopia" color-interpolation-filters="linearRGB">
+    <feColorMatrix type="matrix" values="0.567 0.433 0 0 0  0.558 0.442 0 0 0  0 0.242 0.758 0 0  0 0 0 1 0"/>
+  </filter>
+  <filter id="cvd-tritanopia" color-interpolation-filters="linearRGB">
+    <feColorMatrix type="matrix" values="0.95 0.05 0 0 0  0 0.433 0.567 0 0  0 0.475 0.525 0 0  0 0 0 1 0"/>
+  </filter>
+  <filter id="cvd-achromatopsia" color-interpolation-filters="linearRGB">
+    <feColorMatrix type="matrix" values="0.2126 0.7152 0.0722 0 0  0.2126 0.7152 0.0722 0 0  0.2126 0.7152 0.0722 0 0  0 0 0 1 0"/>
+  </filter>
+</svg>
+
+<style>
+:root {
+  --bg:            #05070a;
+  --bg:            oklch(0.13 0.014 200);
+  --panel:         #0a0f14;
+  --panel:         oklch(0.18 0.018 200);
+  --line:          #16202a;
+  --line:          oklch(0.27 0.022 200);
+  --ink:           #b8cbd4;
+  --ink:           oklch(0.82 0.021 200);
+  --dim:           #5f7480;
+  --dim:           oklch(0.58 0.020 210);
+  --green:         #5fe3a1;
+  --green:         oklch(0.86 0.17 158);
+  --cyan:          #4fd9e8;
+  --cyan:          oklch(0.84 0.12 205);
+  --magenta:       #e86bd0;
+  --magenta:       oklch(0.74 0.20 330);
+  --amber:         #e8b45f;
+  --amber:         oklch(0.82 0.14 78);
+  --grid:          #0d141a;
+  --grid:          oklch(0.20 0.018 200);
+  --radius:        0.375rem;
+  --mono: ui-monospace, "SF Mono", "JetBrains Mono", "Fira Code", Menlo, Consolas, monospace;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background:
+    repeating-linear-gradient(0deg,  transparent 0 2rem, var(--grid) 2rem 2.0625rem),
+    repeating-linear-gradient(90deg, transparent 0 2rem, var(--grid) 2rem 2.0625rem),
+    var(--bg);
+  color: var(--ink);
+  font: 0.8125rem/1.55 var(--mono);
+  min-height: 100dvh;
+  padding: 1rem;
+}
+
+.shell { max-width: 96rem; margin: 0 auto; }
+
+header {
+  display: flex; align-items: baseline; gap: 0.75rem; flex-wrap: wrap;
+  padding-bottom: 0.75rem; border-bottom: 1px solid var(--line);
+}
+h1 { font-size: 0.9375rem; font-weight: 600; letter-spacing: 0.04em; color: var(--green); }
+.pkg { color: var(--dim); font-size: 0.75rem; }
+.pkg b { color: var(--cyan); font-weight: 500; }
+.tag {
+  margin-left: auto; font-size: 0.6875rem; color: var(--amber);
+  border: 1px solid var(--line); border-radius: 999px; padding: 0.125rem 0.625rem;
+}
+
+.tabs { display: flex; gap: 0.25rem; margin: 0.75rem 0; flex-wrap: wrap; }
+.tabs button {
+  font: inherit; font-size: 0.75rem; color: var(--dim); background: transparent;
+  border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 0.4375rem 0.875rem; cursor: pointer; display: flex; gap: 0.5rem; align-items: center;
+  transition: color 120ms, border-color 120ms;
+}
+.tabs button[aria-current="true"] { color: var(--green); border-color: var(--green); }
+.scene-num { color: var(--line); font-size: 0.625rem; }
+.tabs button[aria-current="true"] .scene-num { color: var(--green); }
+@media (hover: hover) { .tabs button:hover:not([aria-current="true"]) { color: var(--ink); } }
+
+main { display: grid; grid-template-columns: minmax(0, 1fr) 20rem; gap: 0.75rem; }
+
+/* Scene stacking: one grid cell, every scene in it, IN NORMAL FLOW.
+   This used to be `.stage-wrap { position: relative }` + `.scene { position: absolute;
+   inset: 0 }`. That was a trap. An absolutely-positioned element with `z-index: auto`
+   paints ABOVE static in-flow content, so the instant the stage overflowed its wrapper
+   the canvas painted straight over the control panel below it — the controls were still
+   there, still clickable in theory, just buried under an opaque canvas.
+   A grid stack has no such failure mode: the scenes are in flow, the wrapper sizes to
+   the active one, and nothing can escape its box. */
+.stage-wrap { display: grid; }
+.scene { grid-area: 1 / 1; display: none; min-width: 0; }
+.scene[data-active] { display: block; }
+
+.stage {
+  position: relative;              /* only so the overlays can anchor to it */
+  width: 100%;
+  height: 32rem;                   /* explicit. no height:100% + min-height dance. */
+  border: 1px solid var(--line); border-radius: var(--radius);
+  background: #000; overflow: hidden;
+}
+/* touch-action is the whole fix. Without it the canvas swallows the gesture and the
+   page cannot be scrolled at all once the canvas fills the viewport. `pan-y` hands
+   vertical panning back to the browser (page scroll) and `pinch-zoom` hands back page
+   zoom, while horizontal drags still reach our pointer handlers. */
+canvas {
+  display: block; width: 100%; height: 100%;
+  touch-action: pan-y pinch-zoom;
+}
+/* the CVD filter rides on the canvas element — one compositing pass, count-independent */
+canvas[data-cvd]:not([data-cvd="none"]) { filter: var(--cvd-filter); }
+
+.overlay {
+  position: absolute; pointer-events: none; font-size: 0.6875rem; color: var(--dim);
+  padding: 0.5rem 0.75rem; line-height: 1.4;
+}
+.overlay.tl { top: 0; left: 0; }
+.overlay.tr { top: 0; right: 0; text-align: right; }
+.overlay.br { bottom: 0; right: 0; text-align: right; }
+.big { display: block; font-size: 1.125rem; color: var(--magenta); letter-spacing: 0.02em; }
+
+.nogl {
+  position: absolute; inset: 0; display: none; place-items: center;
+  color: var(--magenta); font-size: 0.8125rem; text-align: center; padding: 2rem;
+}
+.stage:has(canvas[data-failed]) .nogl { display: grid; }
+
+.panel {
+  border: 1px solid var(--line); border-radius: var(--radius);
+  background: var(--panel); padding: 0.875rem; align-self: start;
+  display: flex; flex-direction: column; gap: 0.875rem;
+  max-height: calc(100dvh - 9rem); overflow-y: auto;
+}
+.panel-head {
+  font-size: 0.6875rem; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--green); border-bottom: 1px solid var(--line); padding-bottom: 0.5rem;
+}
+.panel h3 {
+  font-size: 0.6875rem; letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--dim); margin-bottom: 0.5rem; font-weight: 500;
+}
+.help { font-size: 0.6875rem; color: var(--dim); line-height: 1.55; }
+.help code { color: var(--cyan); }
+.help b { color: var(--ink); font-weight: 500; }
+
+.ctl { display: none; flex-direction: column; gap: 0.75rem; }
+.ctl[data-active] { display: flex; }
+
+.field { display: flex; flex-direction: column; gap: 0.25rem; }
+.field label {
+  display: flex; justify-content: space-between; align-items: baseline;
+  font-size: 0.6875rem; color: var(--dim);
+}
+.val { color: var(--cyan); }
+
+input[type="range"] {
+  -webkit-appearance: none; appearance: none; width: 100%; height: 1.25rem;
+  background: transparent; cursor: pointer;
+}
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 2px; background: var(--line); border-radius: 2px;
+}
+input[type="range"]::-moz-range-track { height: 2px; background: var(--line); border-radius: 2px; }
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 0.75rem; height: 0.75rem; border-radius: 50%;
+  background: var(--green); margin-top: -0.3125rem;
+}
+input[type="range"]::-moz-range-thumb {
+  width: 0.75rem; height: 0.75rem; border: 0; border-radius: 50%; background: var(--green);
+}
+
+select {
+  font: inherit; font-size: 0.75rem; width: 100%;
+  color: var(--ink); background: var(--bg);
+  border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 0.375rem 0.5rem; cursor: pointer;
+}
+
+.btn-row { display: flex; gap: 0.375rem; flex-wrap: wrap; }
+.btn {
+  font: inherit; font-size: 0.6875rem; flex: 1 1 auto;
+  color: var(--dim); background: transparent;
+  border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 0.375rem 0.5rem; cursor: pointer;
+  transition: color 120ms, border-color 120ms;
+}
+.btn[aria-pressed="true"] { color: var(--green); border-color: var(--green); }
+@media (hover: hover) { .btn:hover { color: var(--ink); } }
+
+.ramp {
+  width: 100%; height: 1.75rem; display: block;
+  border: 1px solid var(--line); border-radius: var(--radius);
+}
+
+.metrics { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
+.metric {
+  border: 1px solid var(--line); border-radius: var(--radius); padding: 0.375rem 0.5rem;
+}
+.metric .k { font-size: 0.625rem; color: var(--dim); }
+.metric .v { font-size: 0.875rem; color: var(--ink); }
+.metric .v.green { color: var(--green); }
+.metric .v.cyan { color: var(--cyan); }
+.metric .v.amber { color: var(--amber); }
+
+.thesis {
+  border: 1px solid var(--line); border-left: 2px solid var(--amber);
+  border-radius: var(--radius); padding: 0.5rem 0.625rem;
+  font-size: 0.6875rem; color: var(--dim); line-height: 1.5;
+}
+.thesis b { color: var(--amber); font-weight: 500; }
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   NARROW VIEWPORTS — this block must be LAST.
+
+   A media query contributes NOTHING to specificity. An override inside one still
+   has to win on source order, and the first cut of this file put these rules ABOVE
+   the declarations they were meant to override. Both silently lost:
+
+     @media (width < 60rem) { .panel { max-height: none } }   <- line 68, dead
+     .panel { max-height: calc(100dvh - 9rem); overflow-y: auto }  <- line 116, won
+
+   so on a phone the panel stayed an internal scroller and the PAGE could not be
+   scrolled to the bottom at all. And:
+
+     @media (width < 60rem) { .stage { min-height: 0 } }      <- dead
+     .stage { min-height: 32rem }                             <- won
+
+   so the stage kept a 512px floor inside a wrapper capped at 58dvh, overflowed it,
+   and (being absolutely positioned) painted the canvas over the controls.
+
+   Two dead rules, one screenshot. Keep this block at the bottom.
+   ───────────────────────────────────────────────────────────────────────────── */
+@media (width < 60rem) {
+  main { grid-template-columns: minmax(0, 1fr); }
+
+  /* Never let the stage eat the whole viewport — leave something to scroll with. */
+  .stage { height: min(32rem, 58dvh); }
+
+  /* The panel scrolls WITH THE PAGE here, not inside itself. */
+  .panel { max-height: none; overflow-y: visible; }
+}
+</style>
+</head>
+<body>
+<div class="shell">
+  <header>
+    <h1>256 conversions, one million particles</h1>
+    <span class="pkg"><b>@zakkster/lite-gl</b> · <b>lite-color-engine</b> · <b>lite-color-lerp</b> · <b>lite-signal</b></span>
+    <span class="tag" id="tag-mode">webgl2</span>
+  </header>
+
+  <nav class="tabs" id="tabs">
+    <button data-tab="lorenz" aria-current="true"><span class="scene-num">01</span>Lorenz Ribbon</button>
+    <button data-tab="flow"><span class="scene-num">02</span>Particle Gradient</button>
+  </nav>
+
+  <main>
+    <div class="stage-wrap">
+      <section class="scene" data-scene="lorenz" data-active>
+        <div class="stage">
+          <canvas id="lorenz-canvas" data-cvd="none"></canvas>
+          <div class="nogl">WebGL2 unavailable in this browser.</div>
+          <div class="overlay tl">lorenz attractor · thick LINE segments</div>
+          <div class="overlay tr">segments on gpu<span class="big" id="lz-count">0</span></div>
+          <div class="overlay br" id="lz-hint">drag to pan · scroll to zoom</div>
+        </div>
+      </section>
+
+      <section class="scene" data-scene="flow">
+        <div class="stage">
+          <canvas id="flow-canvas" data-cvd="none"></canvas>
+          <div class="nogl">WebGL2 unavailable in this browser.</div>
+          <div class="overlay tl">curl flow field · POINT sprites · colour = speed</div>
+          <div class="overlay tr">particles on gpu<span class="big" id="fl-count">0</span></div>
+          <div class="overlay br">drag to push the field</div>
+        </div>
+      </section>
+    </div>
+
+    <aside class="panel">
+      <div class="panel-head">colour is a 256-cell LUT</div>
+
+      <p class="help">
+        Every primitive's colour is one <b>gather from a 256-entry LUT</b>, baked by
+        <code>lite-color-lerp</code> and packed by <code>lite-color-engine</code>. Moving a
+        slider re-bakes <b>256 cells</b> — never a million. That is the whole trick, and it
+        is why the sliders don't lag at 1M points.
+      </p>
+
+      <canvas class="ramp" id="ramp" width="512" height="56"></canvas>
+
+      <!-- ── scene 01 controls ── -->
+      <section class="ctl" data-ctl="lorenz" data-active>
+        <h3>scene 01 · ribbon</h3>
+        <div class="field">
+          <label>segments <span class="val" id="lz-n-v">20K</span></label>
+          <input type="range" id="lz-n" min="5000" max="200000" step="5000" value="20000">
+        </div>
+        <div class="field">
+          <label>width <span class="val" id="lz-w-v">2.5px</span></label>
+          <input type="range" id="lz-w" min="0.5" max="8" step="0.5" value="2.5">
+        </div>
+        <div class="btn-row">
+          <button class="btn" id="lz-rot" type="button" aria-pressed="true">◐ auto-rotate</button>
+          <button class="btn" id="lz-reset" type="button">reset view</button>
+        </div>
+      </section>
+
+      <!-- ── scene 02 controls ── -->
+      <section class="ctl" data-ctl="flow">
+        <h3>scene 02 · particles</h3>
+        <div class="field">
+          <label>particles <span class="val" id="fl-n-v">100K</span></label>
+          <input type="range" id="fl-n" min="10000" max="1000000" step="10000" value="100000">
+        </div>
+        <div class="field">
+          <label>size <span class="val" id="fl-sz-v">1.5px</span></label>
+          <input type="range" id="fl-sz" min="1" max="6" step="0.5" value="1.5">
+        </div>
+        <div class="field">
+          <label>flow speed <span class="val" id="fl-sp-v">1.00×</span></label>
+          <input type="range" id="fl-sp" min="0.1" max="3" step="0.05" value="1">
+        </div>
+        <div class="field">
+          <label>turbulence <span class="val" id="fl-tb-v">3</span></label>
+          <input type="range" id="fl-tb" min="1" max="6" step="1" value="3">
+        </div>
+      </section>
+
+      <!-- ── shared colour rail ── -->
+      <section>
+        <h3>gradient</h3>
+        <div class="field">
+          <label for="preset">preset</label>
+          <select id="preset"></select>
+        </div>
+        <div class="field">
+          <label>L start <span class="val" id="l0-v">0.30</span></label>
+          <input type="range" id="l0" min="0.05" max="1" step="0.01" value="0.30">
+        </div>
+        <div class="field">
+          <label>L end <span class="val" id="l1-v">0.92</span></label>
+          <input type="range" id="l1" min="0.05" max="1" step="0.01" value="0.92">
+        </div>
+        <div class="field">
+          <label>chroma <span class="val" id="ch-v">0.20</span></label>
+          <input type="range" id="ch" min="0" max="0.37" step="0.005" value="0.20">
+        </div>
+        <div class="field">
+          <label>hue start <span class="val" id="h0-v">280°</span></label>
+          <input type="range" id="h0" min="0" max="360" step="1" value="280">
+        </div>
+        <div class="field">
+          <label>hue sweep <span class="val" id="hs-v">+160°</span></label>
+          <input type="range" id="hs" min="-360" max="360" step="5" value="160">
+        </div>
+        <div class="field">
+          <label>alpha <span class="val" id="al-v">0.45</span></label>
+          <input type="range" id="al" min="0.02" max="1" step="0.01" value="0.45">
+        </div>
+        <div class="btn-row">
+          <button class="btn" id="mono" type="button" aria-pressed="false">monochrome</button>
+          <button class="btn" id="gamut" type="button" aria-pressed="false">gamut: clamp</button>
+        </div>
+        <p class="help" id="gamut-note">
+          <b>clamp</b> — out-of-gamut chroma is clipped per channel, which shifts hue.
+          Push chroma past ~0.25 and watch the ramp bend.
+        </p>
+      </section>
+
+      <section>
+        <h3>vision</h3>
+        <div class="field">
+          <label for="cvd">colour-vision deficiency</label>
+          <select id="cvd"></select>
+        </div>
+        <p class="help">
+          Simulated with the same <code>feColorMatrix</code> matrices Hueforge.app uses, in
+          <code>linearRGB</code>. It rides on the canvas as one compositing pass — so it
+          costs the same at 20K segments and at 1M particles.
+        </p>
+      </section>
+
+      <section>
+        <h3>telemetry</h3>
+        <div class="metrics">
+          <div class="metric"><div class="k">fps</div><div class="v green" id="m-fps">–</div></div>
+          <div class="metric"><div class="k">primitives</div><div class="v cyan" id="m-prims">–</div></div>
+          <div class="metric"><div class="k">LUT bake</div><div class="v amber" id="m-bake">–</div></div>
+          <div class="metric"><div class="k">frame cpu</div><div class="v" id="m-cpu">–</div></div>
+          <div class="metric"><div class="k">upload</div><div class="v" id="m-up">–</div></div>
+          <div class="metric"><div class="k">colour cost</div><div class="v green" id="m-share">–</div></div>
+          <div class="metric"><div class="k">rAF Δ</div><div class="v amber" id="m-raf">–</div></div>
+          <div class="metric"><div class="k">draws</div><div class="v" id="m-draws">–</div></div>
+        </div>
+        <p class="thesis">
+          <b>LUT bake</b> is the entire cost of a slider move: 256 OKLCH→sRGB conversions.
+          Converting every primitive instead would be <b id="m-naive">–</b> — 57× over the
+          frame budget at 1M.
+        </p>
+        <p class="thesis">
+          Above ~500K the limit is <b>uploading positions</b> (30 MB/frame at 1M — 1.8 GB/s
+          to hold 60), not colour. That is the point: colour never becomes the bottleneck,
+          at any count. Drop to 100K for a locked 60.
+        </p>
+        <p class="thesis">
+          <b>rAF Δ</b> is the honest number. ~8.3 ms means the browser is giving you 120 Hz
+          and any low fps is this page's fault. ~16.7 or ~33 ms means the browser is
+          throttling and nothing in this file can fix it. <b>draws</b> should equal fps —
+          if it is lower, frames are being skipped.
+        </p>
+      </section>
+    </aside>
+  </main>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "@zakkster/lite-signal": "https://esm.sh/@zakkster/lite-signal@1.6.0-preview.2",
+    "@zakkster/lite-raf": "https://esm.sh/@zakkster/lite-raf@1.1.0?external=@zakkster/lite-signal",
+    "@zakkster/lite-gl": "https://esm.sh/@zakkster/lite-gl@1.3.0?external=@zakkster/lite-signal,@zakkster/lite-raf",
+    "@zakkster/lite-gl/backend": "https://esm.sh/@zakkster/lite-gl@1.3.0/backend?external=@zakkster/lite-signal,@zakkster/lite-raf",
+    "@zakkster/lite-color": "https://esm.sh/@zakkster/lite-color@1.0.7",
+    "@zakkster/lite-color-lerp": "https://esm.sh/@zakkster/lite-color-lerp@1.1.0?external=@zakkster/lite-color",
+    "@zakkster/lite-color-engine": "https://esm.sh/@zakkster/lite-color-engine@1.5.0",
+    "@zakkster/lite-color-engine/gamut": "https://esm.sh/@zakkster/lite-color-engine@1.5.0/gamut"
+  }
+}
+</script>
+
+<script type="module">
+import { signal, effect, onCleanup, dispose } from '@zakkster/lite-signal';
+import { createField, createDriver, LAYOUT }  from '@zakkster/lite-gl';
+import { createPointSink, createLineSink }    from '@zakkster/lite-gl/backend';
+import { bakeGradientLUT }                    from '@zakkster/lite-color-lerp';
+import { packOklchBufferToUint32MINDE }       from '@zakkster/lite-color-engine/gamut';
+
+// lite-gl's reactiveField wraps `project` in effect() from ITS OWN lite-signal import.
+// If the bundler/CDN hands lite-gl a second copy of lite-signal, our signals are
+// invisible to that effect and the field never re-projects. createDriver() is the
+// injection seam for exactly this: bind the driver to OUR registry and the question
+// stops being a question.
+const { reactiveField } = createDriver({ effect, onCleanup, dispose });
+
+const TAU = Math.PI * 2;
+const DPR = Math.min(window.devicePixelRatio || 1, 2);
+
+// Touch devices get different rules. Wheel-zoom does not exist there, and hijacking
+// the gesture stream on a canvas that fills the screen leaves the page unscrollable —
+// which is exactly what the first cut of this demo did.
+const COARSE = window.matchMedia('(pointer: coarse)').matches;
+
+// A phone should not be asked to allocate a 32 MB CPU field plus a 32 MB GPU buffer
+// for a slider it will never reach. Capacity is fixed at init, so it is chosen here.
+const FL_CAP = COARSE ? 250000 : 1000000;
+const LZ_CAP = COARSE ? 60000 : 200000;
+const LUT_N = 256;
+const LUT_MAX = LUT_N - 1;
+
+// ── cached DOM (module init, once) ────────────────────────────────────────────
+const $ = (id) => document.getElementById(id);
+const $tabs      = $('tabs');
+const $ramp      = $('ramp');
+const $lzCanvas  = $('lorenz-canvas');
+const $flCanvas  = $('flow-canvas');
+const $lzCount   = $('lz-count');
+const $flCount   = $('fl-count');
+const $lzN       = $('lz-n'),  $lzNV  = $('lz-n-v');
+const $lzW       = $('lz-w'),  $lzWV  = $('lz-w-v');
+const $lzRot     = $('lz-rot'), $lzReset = $('lz-reset');
+const $flN       = $('fl-n'),  $flNV  = $('fl-n-v');
+const $flSz      = $('fl-sz'), $flSzV = $('fl-sz-v');
+const $flSp      = $('fl-sp'), $flSpV = $('fl-sp-v');
+const $flTb      = $('fl-tb'), $flTbV = $('fl-tb-v');
+const $preset    = $('preset');
+const $l0 = $('l0'), $l0V = $('l0-v');
+const $l1 = $('l1'), $l1V = $('l1-v');
+const $ch = $('ch'), $chV = $('ch-v');
+const $h0 = $('h0'), $h0V = $('h0-v');
+const $hs = $('hs'), $hsV = $('hs-v');
+const $al = $('al'), $alV = $('al-v');
+const $mono      = $('mono');
+const $gamut     = $('gamut');
+const $gamutNote = $('gamut-note');
+const $cvd       = $('cvd');
+const $mFps   = $('m-fps');
+const $mPrims = $('m-prims');
+const $mBake  = $('m-bake');
+const $mCpu   = $('m-cpu');
+const $mNaive = $('m-naive');
+const $mUp    = $('m-up');
+const $mShare = $('m-share');
+const $mRaf   = $('m-raf');
+const $mDraws = $('m-draws');
+const $tagMode = $('tag-mode');
+const $lzHint  = $('lz-hint');
+
+const rampCtx = $ramp.getContext('2d');
+
+// throttled HUD writes — textContent only when the value actually changed
+const hud = ($el, v) => { if ($el._v !== v) { $el._v = v; $el.textContent = v; } };
+const fmtN = (n) => (n >= 1e6 ? (n / 1e6).toFixed(2) + 'M' : n >= 1e3 ? (n / 1e3 | 0) + 'K' : '' + n);
+
+// ── the colour rail ───────────────────────────────────────────────────────────
+// One 256-cell LUT feeds BOTH scenes. Sliders rebake it; nothing else in the app
+// ever performs a colour conversion. `colourEpoch` is what the fields track.
+const colourEpoch = signal(0);
+
+const PRESETS = [
+  { name: 'Aurora',      l0: 0.30, l1: 0.92, c: 0.20, h0: 280, hs:  160, stops: 4 },
+  { name: 'Ember',       l0: 0.22, l1: 0.95, c: 0.24, h0:  15, hs:   75, stops: 4 },
+  { name: 'Abyss',       l0: 0.18, l1: 0.80, c: 0.17, h0: 250, hs:  -70, stops: 3 },
+  { name: 'Phosphor',    l0: 0.28, l1: 0.95, c: 0.22, h0: 150, hs:   55, stops: 3 },
+  { name: 'Full wheel',  l0: 0.70, l1: 0.70, c: 0.19, h0:   0, hs:  360, stops: 6 },
+  { name: 'Sodium',      l0: 0.25, l1: 0.97, c: 0.16, h0:  45, hs:   30, stops: 3 },
+];
+
+// Pre-built stop objects + per-length views. Rebaking mutates these in place and
+// hands `bakeGradientLUT` an existing array — no allocation on a slider drag.
+const MAX_STOPS = 8;
+const STOP_OBJS = [];
+for (let i = 0; i < MAX_STOPS; i++) STOP_OBJS.push({ l: 0, c: 0, h: 0 });
+const STOP_VIEWS = [];
+for (let n = 0; n <= MAX_STOPS; n++) STOP_VIEWS.push(STOP_OBJS.slice(0, n));
+
+// The MINDE adapter, exactly the recipe in lite-color-lerp's README: the engine's
+// packer is buffer-based, so one 3-element scratch lives outside the closure.
+const _mindeScratch = new Float32Array(3);
+const packMINDE = (l, c, h, a) => {
+  _mindeScratch[0] = l; _mindeScratch[1] = c; _mindeScratch[2] = h;
+  return packOklchBufferToUint32MINDE(_mindeScratch, 0, a);
+};
+// NOTE: bakeGradientLUT's signature is (colors, resolution, opts) — three args.
+// Passing opts in a fourth slot silently disables it and the packer never runs, with
+// no error and plausible-looking output. Ask me how I know.
+const OPTS_CLAMP = {};
+const OPTS_MINDE = { pack: packMINDE };
+
+// unpacked LUT, ready for the GPU (straight float gathers, no conversion)
+const lutR = new Float32Array(LUT_N);
+const lutG = new Float32Array(LUT_N);
+const lutB = new Float32Array(LUT_N);
+const lutA = new Float32Array(LUT_N);
+
+let cL0 = 0.30, cL1 = 0.92, cC = 0.20, cH0 = 280, cHS = 160, cAlpha = 0.45;
+let cStops = 4, cMono = false, cMinde = false;
+let bakeMs = 0;
+let _rampImg = null;          // allocated once; see rebakeLut()
+
+function rebakeLut() {
+  const t0 = performance.now();
+
+  const n = cStops;
+  const span = n > 1 ? n - 1 : 1;
+  for (let i = 0; i < n; i++) {
+    const u = i / span;
+    const s = STOP_OBJS[i];
+    s.l = cL0 + (cL1 - cL0) * u;
+    s.c = cMono ? 0 : cC;
+    s.h = cH0 + cHS * u;
+  }
+
+  // 256 conversions. This is the entire cost of moving a slider.
+  const lut = bakeGradientLUT(STOP_VIEWS[n], LUT_N, cMinde ? OPTS_MINDE : OPTS_CLAMP);
+
+  // little-endian RGBA: byte0=R, byte1=G, byte2=B, byte3=A
+  const inv = 1 / 255;
+  for (let i = 0; i < LUT_N; i++) {
+    const v = lut[i];
+    lutR[i] = (v & 255) * inv;
+    lutG[i] = ((v >> 8) & 255) * inv;
+    lutB[i] = ((v >> 16) & 255) * inv;
+    lutA[i] = ((v >>> 24) * inv) * cAlpha;
+  }
+
+  bakeMs = performance.now() - t0;
+
+  // Preview strip — the LUT, drawn as itself.
+  // createImageData() allocates width*height*4 bytes EVERY call. At 512x56 that is
+  // 114,688 bytes per slider event: ~65 MB of garbage over a ten-second drag, on the
+  // one code path whose entire pitch is that dragging a slider is free. Allocate once,
+  // reuse forever. (Row 0 is filled, then blitted down — the ramp is 1-D.)
+  const w = $ramp.width, h = $ramp.height;
+  if (_rampImg === null || _rampImg.width !== w || _rampImg.height !== h) {
+    _rampImg = rampCtx.createImageData(w, h);
+  }
+  const px = _rampImg.data;
+  for (let x = 0; x < w; x++) {
+    const k = (x * LUT_N / w) | 0;
+    const o = x * 4;
+    px[o]     = (lutR[k] * 255) | 0;
+    px[o + 1] = (lutG[k] * 255) | 0;
+    px[o + 2] = (lutB[k] * 255) | 0;
+    px[o + 3] = 255;
+  }
+  const rowBytes = w * 4;
+  for (let y = 1; y < h; y++) px.copyWithin(y * rowBytes, 0, rowBytes);
+  rampCtx.putImageData(_rampImg, 0, 0);
+
+  colourEpoch.set(colourEpoch() + 1);
+}
+
+// ── scene 01 · Lorenz ribbon ──────────────────────────────────────────────────
+const LZ_MAX_PTS = LZ_CAP + 1;
+const LZ_MAX_SEG = LZ_CAP;
+
+const lzWx = new Float64Array(LZ_MAX_PTS);
+const lzWy = new Float64Array(LZ_MAX_PTS);
+const lzWz = new Float64Array(LZ_MAX_PTS);
+const lzSx = new Float64Array(LZ_MAX_PTS);
+const lzSy = new Float64Array(LZ_MAX_PTS);
+
+// Classic Lorenz, forward Euler at a small dt. Integrated once at module init.
+function genLorenz() {
+  const SIGMA = 10, RHO = 28, BETA = 8 / 3, DT = 0.0042;
+  let x = 0.01, y = 0, z = 0;
+  for (let i = 0; i < LZ_MAX_PTS; i++) {
+    const dx = SIGMA * (y - x);
+    const dy = x * (RHO - z) - y;
+    const dz = x * y - BETA * z;
+    x += dx * DT; y += dy * DT; z += dz * DT;
+    lzWx[i] = x; lzWy[i] = y; lzWz[i] = z;
+  }
+}
+genLorenz();
+
+const lzPhase = signal(0.6);
+const lzCam   = signal({ x: 0, y: 0, z: 1 });
+
+let lzSeg = 20000, lzWidth = 2.5;
+let lzW = 1, lzH = 1, lzScale = 1;
+let lzColourEpoch = -1;
+
+const lzField = createField({ capacity: LZ_MAX_SEG, stride: LAYOUT.LINE });
+lzField.setCount(lzSeg);
+
+function lzProject(f) {
+  const ph = lzPhase();          // tracked
+  const cam = lzCam();           // tracked
+  const epoch = colourEpoch();   // tracked
+
+  const n = lzSeg;
+  const pts = n + 1;
+  const ca = Math.cos(ph), sa = Math.sin(ph);
+  const s = lzScale * cam.z;
+  const cx = lzW * 0.5 - cam.x;
+  const cy = lzH * 0.5 - cam.y;
+
+  for (let i = 0; i < pts; i++) {
+    const x = lzWx[i], y = lzWy[i], z = lzWz[i];
+    lzSx[i] = cx + (x * ca - y * sa) * s;
+    lzSy[i] = cy - (z - 25) * s;
+  }
+
+  const data = f.data;
+  const recolour = epoch !== lzColourEpoch;
+  const kScale = LUT_N / n;
+  const wpx = lzWidth * DPR;
+
+  for (let i = 0; i < n; i++) {
+    const b = i * 9;
+    data[b]     = lzSx[i];
+    data[b + 1] = lzSy[i];
+    data[b + 2] = lzSx[i + 1];
+    data[b + 3] = lzSy[i + 1];
+    data[b + 4] = wpx;
+    if (recolour) {
+      let k = (i * kScale) | 0;
+      if (k > LUT_MAX) k = LUT_MAX;
+      data[b + 5] = lutR[k];
+      data[b + 6] = lutG[k];
+      data[b + 7] = lutB[k];
+      data[b + 8] = lutA[k];
+    }
+  }
+  lzColourEpoch = epoch;
+  f.touchAll();
+}
+
+// ── scene 02 · curl flow field ────────────────────────────────────────────────
+const FL_MAX = FL_CAP;
+const GN = 128, GMASK = GN - 1, GSHIFT = 7;   // power-of-two grid, bitmask indexing
+
+const flPx = new Float32Array(FL_MAX);
+const flPy = new Float32Array(FL_MAX);
+// Lifetimes. Curl noise is incompressible in the continuum, but a 128x128 nearest-cell
+// lookup with forward Euler is not, and that residual numerical divergence still slowly
+// thins the field (100% -> 89% cell occupancy over 60s, measured). A staggered lifetime
+// with respawn pins it at 100% forever, and costs one float compare per particle.
+const flAge = new Float32Array(FL_MAX);
+const fvx  = new Float32Array(GN * GN);
+const fvy  = new Float32Array(GN * GN);
+// LUT cell per GRID cell, not per particle. The colour of a particle is decided by
+// where it is, so it is resolved 16,384 times per frame instead of 1,000,000 —
+// and the per-particle cost collapses to a single Uint8Array read.
+const fk   = new Uint8Array(GN * GN);
+
+let flN = 100000, flSize = 1.5, flSpeed = 1, flTurb = 3;
+let flW = 1, flH = 1;
+let flPushX = 0, flPushY = 0;
+let flSizeDirty = true;      // size is constant per frame; only write it when it moves
+let flFieldTick = 0;         // the 16K-cell field is rebuilt every other frame
+let flAgeStep = 1 / 240;     // ~4 s life; retuned from the real frame delta each frame
+let flRng = 0x1234567;       // xorshift, for respawn positions. no allocation.
+
+const flField = createField({ capacity: FL_MAX, stride: LAYOUT.POINT });
+flField.setCount(flN);
+
+let flSeed = 1;
+function flSeedParticles() {
+  // xorshift — deterministic, allocation-free
+  let s = 0x9e3779b9;
+  for (let i = 0; i < FL_MAX; i++) {
+    s ^= s << 13; s >>>= 0; s ^= s >> 17; s ^= s << 5; s >>>= 0;
+    flPx[i] = (s >>> 8) / 16777216;
+    s ^= s << 13; s >>>= 0; s ^= s >> 17; s ^= s << 5; s >>>= 0;
+    flPy[i] = (s >>> 8) / 16777216;
+    // Staggered initial ages. Without this every particle would hit its lifetime on
+    // the same frame and the whole field would blink.
+    s ^= s << 13; s >>>= 0; s ^= s >> 17; s ^= s << 5; s >>>= 0;
+    flAge[i] = (s >>> 8) / 16777216;
+  }
+}
+flSeedParticles();
+
+// The field is 16,384 cells — regenerated every frame with a time phase, which is
+// cheap enough to keep the flow alive without touching a single particle.
+// TRUE curl noise: v = (dPsi/dy, -dPsi/dx) for a scalar potential Psi. Its divergence
+// is d2Psi/dxdy - d2Psi/dydx, which is IDENTICALLY ZERO. The flow is incompressible —
+// it physically cannot concentrate particles.
+//
+// The first version of this demo built the field from an ANGLE instead:
+// v = (cos(a), sin(a)) * mag with a = f(x, y). That field is not divergence-free — it
+// has sinks — so every particle eventually fell into one and stayed there. Measured:
+// mean |div v| = 7.71, and cell occupancy collapsed 100% -> 18% in ten seconds -> 8%
+// in thirty. The scene opened beautifully and then died into a few bright threads.
+// This one measures mean |div v| = 0.016, all of it discretisation.
+//
+// Integer wave numbers matter: they make Psi periodic with period 1 in x and y, which
+// is the torus the particles wrap on. A non-integer frequency would put a
+// discontinuity along the seam and pile particles against it.
+function flBuildField(t) {
+  const k = flTurb | 0;
+  const kx = k, ky = k + 1, kz = (k >> 1) + 1;
+  const inv = 1 / GN;
+  let maxSq = 1e-6;
+
+  for (let gy = 0; gy < GN; gy++) {
+    const y = gy * inv;
+    for (let gx = 0; gx < GN; gx++) {
+      const x = gx * inv;
+      const A = TAU * kx * x + t;
+      const B = TAU * ky * y - t * 0.7;
+      const C = TAU * kz * (x + y) + t * 0.4;
+
+      const dPdx =  TAU * kx * Math.cos(A) * Math.cos(B) + 0.6 * TAU * kz * Math.cos(C);
+      const dPdy = -TAU * ky * Math.sin(A) * Math.sin(B) + 0.6 * TAU * kz * Math.cos(C);
+
+      const g = (gy << GSHIFT) | gx;
+      const vx = dPdy, vy = -dPdx;      // the curl
+      fvx[g] = vx;
+      fvy[g] = vy;
+      const sq = vx * vx + vy * vy;
+      if (sq > maxSq) maxSq = sq;
+    }
+  }
+
+  // Normalise to unit peak speed, and bake the LUT cell from |v| — colour IS speed,
+  // resolved 16,384 times per frame instead of 1,000,000.
+  const inv2 = 1 / Math.sqrt(maxSq);
+  for (let g = 0; g < GN * GN; g++) {
+    const vx = fvx[g] * inv2, vy = fvy[g] * inv2;
+    fvx[g] = vx;
+    fvy[g] = vy;
+    let c = (Math.sqrt(vx * vx + vy * vy) * LUT_MAX) | 0;
+    if (c > LUT_MAX) c = LUT_MAX;
+    fk[g] = c;
+  }
+}
+
+function flProject(f) {
+  const epoch = colourEpoch();   // tracked — a slider move re-runs this
+  void epoch;
+
+  const n = flN;
+  const data = f.data;
+  const dt = flSpeed * 0.0016;
+  const sizePx = flSize * DPR;
+  const W = flW, H = flH;
+  const pushX = flPushX, pushY = flPushY;
+  const writeSize = flSizeDirty;
+  flSizeDirty = false;
+
+  const ageStep = flAgeStep;
+  let rng = flRng;            // hoisted out of the loop; written back once at the end
+
+  for (let i = 0; i < n; i++) {
+    const x = flPx[i], y = flPy[i];
+    const g = (((y * GN) | 0) & GMASK) << GSHIFT | (((x * GN) | 0) & GMASK);
+    const vx = fvx[g] + pushX;
+    const vy = fvy[g] + pushY;
+
+    let nx = x + vx * dt;
+    let ny = y + vy * dt;
+
+    // Lifetime. Curl noise cannot concentrate particles in theory; nearest-cell
+    // sampling plus forward Euler still can, slowly (100% -> 89% cell occupancy over
+    // 60 s, measured). Respawning on a staggered lifetime makes the density
+    // permanently uniform instead of merely slow to rot. One float compare per particle.
+    let a = flAge[i] + ageStep;
+    if (a >= 1) {
+      rng ^= rng << 13; rng >>>= 0; rng ^= rng >> 17; rng ^= rng << 5; rng >>>= 0;
+      nx = (rng >>> 8) / 16777216;
+      rng ^= rng << 13; rng >>>= 0; rng ^= rng >> 17; rng ^= rng << 5; rng >>>= 0;
+      ny = (rng >>> 8) / 16777216;
+      a = 0;
+    }
+    flAge[i] = a;
+
+    if (nx < 0) nx += 1; else if (nx >= 1) nx -= 1;
+    if (ny < 0) ny += 1; else if (ny >= 1) ny -= 1;
+    flPx[i] = nx; flPy[i] = ny;
+
+    const k = fk[g];          // one Uint8Array read. No colour math per particle.
+
+    const b = i * 8;
+    data[b]     = nx * W;
+    data[b + 1] = ny * H;
+    if (writeSize) data[b + 2] = sizePx;
+    data[b + 3] = lutR[k];
+    data[b + 4] = lutG[k];
+    data[b + 5] = lutB[k];
+    data[b + 6] = lutA[k];
+  }
+  flRng = rng;
+  f.touchAll();
+}
+
+// ── GL bring-up ───────────────────────────────────────────────────────────────
+function initGL(canvas) {
+  // alpha:false + preserveDrawingBuffer:false is not a micro-optimisation here, it is
+  // the difference between a buffer SWAP and a buffer COPY.
+  //
+  //   preserveDrawingBuffer:true forces the browser to keep the framebuffer contents
+  //   across frames, which on macOS/ANGLE-Metal means it cannot swap — it copies the
+  //   whole drawing buffer every single frame. At 2x DPR that is millions of pixels
+  //   memcpy'd per frame, for nothing.
+  //
+  //   alpha:true forces the compositor to BLEND the canvas over the page on every
+  //   frame instead of blitting it. The stage behind it is solid black anyway, so the
+  //   transparency was buying us nothing at all.
+  //
+  // I originally set preserveDrawingBuffer:true so the Lorenz canvas would not blank
+  // on frames where nothing was dirty and we skipped the draw. The right answer was to
+  // stop skipping the draw. See the frame loop.
+  const gl = canvas.getContext('webgl2', {
+    antialias: false,
+    alpha: false,
+    preserveDrawingBuffer: false,
+    powerPreference: 'high-performance',
+  });
+  if (!gl) { canvas.dataset.failed = '1'; return null; }
+  gl.clearColor(0, 0, 0, 1);
+  gl.enable(gl.BLEND);
+  gl.blendFunc(gl.SRC_ALPHA, gl.ONE);   // additive phosphor glow
+  return gl;
+}
+
+// If this reports a software rasteriser, nothing else in this file matters.
+function rendererOf(gl) {
+  const ext = gl.getExtension('WEBGL_debug_renderer_info');
+  if (!ext) return 'webgl2';
+  const r = gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) || '';
+  return String(r).replace(/^ANGLE \(|\)$/g, '').slice(0, 42) || 'webgl2';
+}
+function sizeGL(canvas) {
+  const r = canvas.getBoundingClientRect();
+  const w = Math.max(1, Math.floor(r.width * DPR));
+  const h = Math.max(1, Math.floor(r.height * DPR));
+  if (canvas.width !== w) canvas.width = w;
+  if (canvas.height !== h) canvas.height = h;
+  return [w, h];
+}
+
+const lzGl = initGL($lzCanvas);
+const flGl = initGL($flCanvas);
+if (!lzGl || !flGl) $tagMode.textContent = 'webgl2 unavailable';
+else $tagMode.textContent = rendererOf(lzGl);
+
+const lzSink = lzGl ? createLineSink(lzGl, { capacity: LZ_MAX_SEG }) : null;
+const flSink = flGl ? createPointSink(flGl, { capacity: FL_MAX }) : null;
+
+const lzDriver = lzSink ? reactiveField(lzField, { manual: true, sink: lzSink, project: lzProject }) : null;
+const flDriver = flSink ? reactiveField(flField, { manual: true, sink: flSink, project: flProject }) : null;
+
+// ── frame loop ────────────────────────────────────────────────────────────────
+let active = 'lorenz';
+let running = false, raf = 0;
+let t0 = performance.now(), fpsT = t0, fpsN = 0, hudTick = 0;
+let cpuMs = 0, autoRot = true;
+// rAF delta is the number that tells you WHO is slow. If it sits at ~8.3 ms the browser
+// is handing us 120 Hz and any low fps is our fault. If it sits at ~16.7 or ~33 ms the
+// browser is throttling and no amount of optimising this file will change it.
+let lastNow = 0, rafDt = 0, draws = 0, drawsT = 0, dps = 0;
+
+function frame(now) {
+  if (!running) return;
+
+  if (lastNow !== 0) {
+    const d = now - lastNow;
+    rafDt = rafDt === 0 ? d : rafDt * 0.9 + d * 0.1;   // EMA, no allocation
+  }
+  lastNow = now;
+
+  const c0 = performance.now();
+
+  if (active === 'lorenz' && lzDriver) {
+    if (autoRot) lzPhase.set((now - t0) * 0.00013);   // sync effect -> lzProject -> touchAll
+    // Always clear and draw. The old code skipped both when the field was clean, which
+    // is why preserveDrawingBuffer was needed to stop the canvas blanking — and that
+    // flag cost far more than the draw ever did. touchAll() is O(1); the upload is
+    // count*stride floats (720 KB at 20K segments), which is nothing.
+    lzField.touchAll();
+    lzGl.clear(lzGl.COLOR_BUFFER_BIT);
+    lzDriver.flush();
+    draws++;
+  } else if (active === 'flow' && flDriver) {
+    // 16,384 cells of trig. It is smooth in time, so every other frame is invisible
+    // and buys back ~0.75 ms of a 16.7 ms budget.
+    // 4-second particle life in REAL time, not frames — otherwise a 120 Hz panel
+    // halves the lifetime. Clamped so a tab-switch stall cannot age out the whole
+    // field in a single step.
+    flAgeStep = Math.min(0.05, (rafDt > 0 ? rafDt : 16.7) / 4000);
+    if ((flFieldTick++ & 1) === 0) flBuildField((now - t0) * 0.00022);
+    flProject(flField);          // the sim advances every frame regardless of signals
+    flGl.clear(flGl.COLOR_BUFFER_BIT);
+    flDriver.flush();
+    draws++;
+  }
+
+  cpuMs = performance.now() - c0;
+
+  fpsN++;
+  if (now - fpsT >= 500) {
+    hud($mFps, Math.round(fpsN * 1000 / (now - fpsT)));
+    dps = Math.round(draws * 1000 / (now - fpsT));
+    fpsT = now;
+    fpsN = 0;
+    draws = 0;
+  }
+  // ~7.5 Hz telemetry — toFixed is fine here, it is not in the per-primitive loop
+  if ((hudTick++ & 7) === 0) {
+    const n = active === 'lorenz' ? lzSeg : flN;
+    hud($mPrims, fmtN(n));
+    hud($mBake, bakeMs.toFixed(2) + ' ms');
+    hud($mCpu, cpuMs.toFixed(1) + ' ms');
+    hud($mNaive, (n * 0.0003).toFixed(0) + ' ms');
+    const stride = active === 'lorenz' ? 9 : 8;
+    hud($mUp, (n * stride * 4 / 1048576).toFixed(1) + ' MB/f');
+    hud($mRaf, rafDt.toFixed(1) + ' ms');
+    hud($mDraws, dps + '/s');
+    // the honest headline: colour's share of the frame, whatever the count
+    hud($mShare, (bakeMs / Math.max(cpuMs, 0.01) * 100).toFixed(1) + '%');
+    hud(active === 'lorenz' ? $lzCount : $flCount, fmtN(n));
+  }
+  raf = requestAnimationFrame(frame);
+}
+
+function resize() {
+  if (lzGl) {
+    const [w, h] = sizeGL($lzCanvas);
+    lzW = w; lzH = h;
+    lzScale = Math.min(w, h) / 62;
+    lzSink.resize(w, h);
+    lzProject(lzField);
+  }
+  if (flGl) {
+    const [w, h] = sizeGL($flCanvas);
+    flW = w; flH = h;
+    flSink.resize(w, h);
+  }
+}
+
+// ── controls ──────────────────────────────────────────────────────────────────
+const ac = new AbortController();
+const sig = { signal: ac.signal };
+
+// tabs
+$tabs.addEventListener('click', (e) => {
+  const btn = e.target.closest('button[data-tab]');
+  if (!btn) return;
+  active = btn.dataset.tab;
+  for (const b of $tabs.querySelectorAll('button')) {
+    b.setAttribute('aria-current', String(b.dataset.tab === active));
+  }
+  for (const s of document.querySelectorAll('[data-scene]')) {
+    s.toggleAttribute('data-active', s.dataset.scene === active);
+  }
+  for (const c of document.querySelectorAll('[data-ctl]')) {
+    c.toggleAttribute('data-active', c.dataset.ctl === active);
+  }
+  resize();
+}, sig);
+
+// scene 01
+$lzN.addEventListener('input', () => {
+  lzSeg = +$lzN.value;
+  hud($lzNV, fmtN(lzSeg));
+  lzField.setCount(lzSeg);
+  lzColourEpoch = -1;            // count changed -> the t -> LUT mapping changed
+  lzProject(lzField);
+}, sig);
+$lzW.addEventListener('input', () => {
+  lzWidth = +$lzW.value;
+  hud($lzWV, lzWidth.toFixed(1) + 'px');
+  lzProject(lzField);
+}, sig);
+$lzRot.addEventListener('click', () => {
+  autoRot = !autoRot;
+  $lzRot.setAttribute('aria-pressed', String(autoRot));
+}, sig);
+$lzReset.addEventListener('click', () => {
+  lzCam.set({ x: 0, y: 0, z: 1 });
+  lzPhase.set(0.6);
+}, sig);
+
+// scene 01 pan / zoom — pointer events, coalesced to one reproject per frame
+let dragging = false, lastX = 0, lastY = 0;
+$lzCanvas.addEventListener('pointerdown', (e) => {
+  dragging = true; lastX = e.clientX; lastY = e.clientY;
+  $lzCanvas.setPointerCapture(e.pointerId);
+}, sig);
+$lzCanvas.addEventListener('pointermove', (e) => {
+  if (!dragging) return;
+  const c = lzCam();
+  lzCam.set({ x: c.x - (e.clientX - lastX) * DPR, y: c.y - (e.clientY - lastY) * DPR, z: c.z });
+  lastX = e.clientX; lastY = e.clientY;
+}, sig);
+const lzEndDrag = () => { dragging = false; };
+$lzCanvas.addEventListener('pointerup', lzEndDrag, sig);
+// The browser fires pointercancel when it decides the gesture is a page scroll (which
+// touch-action: pan-y explicitly allows it to do). Without this the drag latches on and
+// the camera keeps panning against a finger that is no longer talking to us.
+$lzCanvas.addEventListener('pointercancel', lzEndDrag, sig);
+$lzCanvas.addEventListener('lostpointercapture', lzEndDrag, sig);
+// Wheel-zoom is a POINTER-FINE affordance. On touch the browser turns scroll and pinch
+// into wheel events, and this handler's preventDefault() ate both — so once the canvas
+// filled the screen the page could not be scrolled at all, only zoomed. Do not register
+// it on coarse pointers; there is nothing to zoom with, and everything to lose.
+if (!COARSE) {
+  $lzCanvas.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const c = lzCam();
+    const z = Math.min(8, Math.max(0.25, c.z * (e.deltaY < 0 ? 1.1 : 1 / 1.1)));
+    lzCam.set({ x: c.x, y: c.y, z });
+  }, { passive: false, signal: ac.signal });
+}
+
+// scene 02
+$flN.addEventListener('input', () => {
+  flN = +$flN.value;
+  flSizeDirty = true;          // the newly-active tail has never had its size written
+  hud($flNV, fmtN(flN));
+  flField.setCount(flN);
+}, sig);
+$flSz.addEventListener('input', () => {
+  flSize = +$flSz.value;
+  flSizeDirty = true;
+  hud($flSzV, flSize.toFixed(1) + 'px');
+}, sig);
+$flSp.addEventListener('input', () => {
+  flSpeed = +$flSp.value;
+  hud($flSpV, flSpeed.toFixed(2) + '×');
+}, sig);
+$flTb.addEventListener('input', () => {
+  flTurb = +$flTb.value;      // integer: keeps the potential periodic on the torus
+  hud($flTbV, String(flTurb | 0));
+}, sig);
+
+let flDrag = false, flLX = 0, flLY = 0;
+$flCanvas.addEventListener('pointerdown', (e) => {
+  flDrag = true; flLX = e.clientX; flLY = e.clientY;
+  $flCanvas.setPointerCapture(e.pointerId);
+}, sig);
+$flCanvas.addEventListener('pointermove', (e) => {
+  if (!flDrag) return;
+  flPushX = (e.clientX - flLX) * 0.04;
+  flPushY = (e.clientY - flLY) * 0.04;
+  flLX = e.clientX; flLY = e.clientY;
+}, sig);
+const flEndDrag = () => { flDrag = false; flPushX = 0; flPushY = 0; };
+$flCanvas.addEventListener('pointerup', flEndDrag, sig);
+$flCanvas.addEventListener('pointercancel', flEndDrag, sig);
+$flCanvas.addEventListener('lostpointercapture', flEndDrag, sig);
+
+// colour rail — every one of these rebakes 256 cells and nothing else
+const bindRail = ($el, $out, fmt, apply) => {
+  $el.addEventListener('input', () => {
+    apply(+$el.value);
+    hud($out, fmt(+$el.value));
+    rebakeLut();
+    if (active === 'lorenz') lzProject(lzField);
+  }, sig);
+};
+bindRail($l0, $l0V, (v) => v.toFixed(2), (v) => { cL0 = v; });
+bindRail($l1, $l1V, (v) => v.toFixed(2), (v) => { cL1 = v; });
+bindRail($ch, $chV, (v) => v.toFixed(3), (v) => { cC = v; });
+bindRail($h0, $h0V, (v) => (v | 0) + '°', (v) => { cH0 = v; });
+bindRail($hs, $hsV, (v) => (v > 0 ? '+' : '') + (v | 0) + '°', (v) => { cHS = v; });
+bindRail($al, $alV, (v) => v.toFixed(2), (v) => { cAlpha = v; });
+
+$mono.addEventListener('click', () => {
+  cMono = !cMono;
+  $mono.setAttribute('aria-pressed', String(cMono));
+  rebakeLut();
+  if (active === 'lorenz') lzProject(lzField);
+}, sig);
+
+$gamut.addEventListener('click', () => {
+  cMinde = !cMinde;
+  $gamut.setAttribute('aria-pressed', String(cMinde));
+  $gamut.textContent = cMinde ? 'gamut: MINDE' : 'gamut: clamp';
+  $gamutNote.innerHTML = cMinde
+    ? '<b>MINDE</b> — chroma is reduced toward the sRGB boundary with hue held. The ramp stays on its hue line; it just runs out of chroma. Injected as <code>{ pack }</code> into the bake.'
+    : '<b>clamp</b> — out-of-gamut chroma is clipped per channel, which shifts hue. Push chroma past ~0.25 and watch the ramp bend.';
+  rebakeLut();
+  if (active === 'lorenz') lzProject(lzField);
+}, sig);
+
+// presets
+for (const p of PRESETS) {
+  const o = document.createElement('option');
+  o.value = p.name; o.textContent = p.name;
+  $preset.appendChild(o);
+}
+$preset.addEventListener('change', () => {
+  const p = PRESETS.find((x) => x.name === $preset.value);
+  if (!p) return;
+  cL0 = p.l0; cL1 = p.l1; cC = p.c; cH0 = p.h0; cHS = p.hs; cStops = p.stops;
+  $l0.value = cL0; $l1.value = cL1; $ch.value = cC; $h0.value = cH0; $hs.value = cHS;
+  hud($l0V, cL0.toFixed(2));
+  hud($l1V, cL1.toFixed(2));
+  hud($chV, cC.toFixed(3));
+  hud($h0V, (cH0 | 0) + '°');
+  hud($hsV, (cHS > 0 ? '+' : '') + (cHS | 0) + '°');
+  rebakeLut();
+  if (active === 'lorenz') lzProject(lzField);
+}, sig);
+
+// CVD — pure CSS, zero JS per frame, count-independent
+const CVD_MODES = ['none', 'protanopia', 'deuteranopia', 'tritanopia', 'achromatopsia'];
+for (const m of CVD_MODES) {
+  const o = document.createElement('option');
+  o.value = m;
+  o.textContent = m === 'none' ? 'none (true colour)' : m;
+  $cvd.appendChild(o);
+}
+$cvd.addEventListener('change', () => {
+  const m = $cvd.value;
+  for (const c of [$lzCanvas, $flCanvas]) {
+    c.dataset.cvd = m;
+    c.style.setProperty('--cvd-filter', m === 'none' ? 'none' : `url(#cvd-${m})`);
+  }
+}, sig);
+
+window.addEventListener('resize', resize, sig);
+
+// ── boot ──────────────────────────────────────────────────────────────────────
+// Initial UI values are read back OUT of the controls, never duplicated in JS.
+cL0 = +$l0.value; cL1 = +$l1.value; cC = +$ch.value;
+cH0 = +$h0.value; cHS = +$hs.value; cAlpha = +$al.value;
+lzSeg = +$lzN.value; lzWidth = +$lzW.value;
+flN = +$flN.value; flSize = +$flSz.value; flSpeed = +$flSp.value; flTurb = +$flTb.value;
+
+hud($l0V, cL0.toFixed(2));
+hud($l1V, cL1.toFixed(2));
+hud($chV, cC.toFixed(3));
+hud($h0V, (cH0 | 0) + '°');
+hud($hsV, (cHS > 0 ? '+' : '') + (cHS | 0) + '°');
+hud($alV, cAlpha.toFixed(2));
+hud($lzNV, fmtN(lzSeg));
+hud($lzWV, lzWidth.toFixed(1) + 'px');
+hud($flNV, fmtN(flN));
+hud($flSzV, flSize.toFixed(1) + 'px');
+hud($flSpV, flSpeed.toFixed(2) + '×');
+hud($flTbV, String(flTurb | 0));
+
+// Sliders must not promise capacity that was never allocated.
+$lzN.max = LZ_CAP;
+$flN.max = FL_CAP;
+if (COARSE) {
+  if (+$lzN.value > LZ_CAP) $lzN.value = LZ_CAP;
+  if (+$flN.value > FL_CAP) $flN.value = FL_CAP;
+  lzSeg = +$lzN.value;
+  flN = +$flN.value;
+  hud($lzNV, fmtN(lzSeg));
+  hud($flNV, fmtN(flN));
+  $lzHint.textContent = 'drag sideways to pan · swipe to scroll';
+}
+
+lzField.setCount(lzSeg);
+flField.setCount(flN);
+
+rebakeLut();
+flBuildField(0);
+resize();
+
+if (lzGl || flGl) {
+  running = true;
+  t0 = performance.now();
+  fpsT = t0;
+  raf = requestAnimationFrame(frame);
+}
+</script>
+</body>
+</html>
